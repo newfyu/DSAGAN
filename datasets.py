@@ -18,9 +18,9 @@ class ImageDataset(Dataset):
         item_A = self.transform(Image.open(self.files_A[index % len(self.files_A)]))
 
         if self.unaligned:
-            item_B = self.transform(Image.open(self.files_B[random.randint(0, len(self.files_B) - 1)]))
+            item_B = self.transform(Image.open(self.files_B[random.randint(0, len(self.files_B) - 1)]).convert('RGB'))
         else:
-            item_B = self.transform(Image.open(self.files_B[index % len(self.files_B)]))
+            item_B = self.transform(Image.open(self.files_B[index % len(self.files_B)]).convert('RGB'))
 
         return {'A': item_A, 'B': item_B}
 

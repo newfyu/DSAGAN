@@ -15,11 +15,11 @@ def tensor2image(tensor):
     return image.astype(np.uint8)
 
 class Logger():
-    def __init__(self, n_epochs, batches_epoch):
+    def __init__(self, epoch, n_epochs, batches_epoch):
         self.viz = Visdom()
         self.n_epochs = n_epochs
         self.batches_epoch = batches_epoch
-        self.epoch = 1
+        self.epoch = epoch
         self.batch = 1
         self.prev_time = time.time()
         self.mean_period = 0
@@ -36,9 +36,9 @@ class Logger():
 
         for i, loss_name in enumerate(losses.keys()):
             if loss_name not in self.losses:
-                self.losses[loss_name] = losses[loss_name].data[0]
+                self.losses[loss_name] = losses[loss_name].data.item()
             else:
-                self.losses[loss_name] += losses[loss_name].data[0]
+                self.losses[loss_name] += losses[loss_name].data.item()
 
             if (i+1) == len(losses.keys()):
                 sys.stdout.write('%s: %.4f -- ' % (loss_name, self.losses[loss_name]/self.batch))
@@ -47,7 +47,7 @@ class Logger():
 
         batches_done = self.batches_epoch*(self.epoch - 1) + self.batch
         batches_left = self.batches_epoch*(self.n_epochs - self.epoch) + self.batches_epoch - self.batch 
-        sys.stdout.write('ETA: %s' % (datetime.timedelta(seconds=batches_left*self.mean_period/batches_done)))
+        #  sys.stdout.write('ETA: %s' % (datetime.timedelta(seconds=batches_left*self.mean_period/batches_done)))
 
         # Draw images
         for image_name, tensor in images.items():
@@ -111,8 +111,8 @@ class LambdaLR():
 def weights_init_normal(m):
     classname = m.__class__.__name__
     if classname.find('Conv') != -1:
-        torch.nn.init.normal(m.weight.data, 0.0, 0.02)
+        torch.nn.init.normal_(m.weight.data, 0.0, 0.02)
     elif classname.find('BatchNorm2d') != -1:
-        torch.nn.init.normal(m.weight.data, 1.0, 0.02)
+        torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant(m.bias.data, 0.0)
 
