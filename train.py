@@ -24,7 +24,7 @@ parser.add_argument('--input_nc', type=int, default=3, help='number of channels 
 parser.add_argument('--output_nc', type=int, default=3, help='number of channels of output data')
 parser.add_argument('--cuda', action='store_true', help='use GPU computation')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
-parser.add_argument('--name', type=str, help='trial name',required=True)
+parser.add_argument('--name', type=str, help='trial name', required=True)
 
 opt = parser.parse_args()
 print(opt)
@@ -89,8 +89,8 @@ lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(optimizer_D_B, lr_lambda=La
 Tensor = torch.cuda.FloatTensor if opt.cuda else torch.Tensor
 input_A = Tensor(opt.batchSize, opt.input_nc, opt.size, opt.size)
 input_B = Tensor(opt.batchSize, opt.output_nc, opt.size, opt.size)
-target_real = Variable(Tensor(opt.batchSize,1).fill_(1.0), requires_grad=False)
-target_fake = Variable(Tensor(opt.batchSize,1).fill_(0.0), requires_grad=False)
+target_real = Variable(Tensor(opt.batchSize, 1).fill_(1.0), requires_grad=False)
+target_fake = Variable(Tensor(opt.batchSize, 1).fill_(0.0), requires_grad=False)
 
 fake_A_buffer = ReplayBuffer()
 fake_B_buffer = ReplayBuffer()
@@ -187,7 +187,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_D_B.step()
         ###################################
 
-        # Progress report (http://localhost:8097)
+        # Progress report (http://localhost:8097) "python -m visdom.server"
         logger.log({'loss_G': loss_G, 'loss_G_identity': (loss_identity_A + loss_identity_B), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A), 'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB), 'loss_D': (loss_D_A + loss_D_B)}, images={'real_A': real_A, 'real_B': real_B, 'fake_A': fake_A, 'fake_B': fake_B})
 
     # Update learning rates
@@ -196,15 +196,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
     lr_scheduler_D_B.step()
 
     # Save models checkpoints
-
-    #  torch.save(netG_A2B.state_dict(), f'ckpt/{opt.name}/netG_A2B.pth')
-    #  torch.save(netG_B2A.state_dict(), f'ckpt/{opt.name}/netG_B2A.pth')
-    #  torch.save(netD_A.state_dict(), f'ckpt/{opt.name}/netD_A.pth')
-    #  torch.save(netD_B.state_dict(), f'ckpt/{opt.name}/netD_B.pth')
-    #  torch.save(optimizer_G.state_dict(), f'ckpt/{opt.name}/optimizer_G.pth')
-    #  torch.save(optimizer_D_A.state_dict(), f'ckpt/{opt.name}/optimizer_D_A.pth')
-    #  torch.save(optimizer_D_B.state_dict(), f'ckpt/{opt.name}/optimizer_D_B.pth')
-
     states = {'netG_A2B': netG_A2B.state_dict(),
               'netG_B2A': netG_B2A.state_dict(),
               'netD_A': netD_A.state_dict(),

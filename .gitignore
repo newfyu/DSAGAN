@@ -109,3 +109,4 @@ output/B/
 *.pth
 ckpt
 bak
+output/
