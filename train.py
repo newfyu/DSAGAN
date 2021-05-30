@@ -222,11 +222,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Image sample
     with torch.no_grad():
-        fake_B = netG_A2B(real_A)
-        fake_A = netG_B2A(real_B)
-        imgcat = torch.cat((real_A,fake_B,real_B,fake_A),dim=2)
-        imgcat = torchvision.utils.make_grid(imgcat,normalize=True)
-        torchvision.utils.save_image(imgcat, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
+        fake_B = netG_A2B(fix_A)
+        fake_A = netG_B2A(fix_B)
+        imgs = torch.cat((fix_A,fake_B,fix_B,fake_A),dim=2)
+        imgs = torchvision.utils.make_grid(imgs,normalize=True)
+        torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
 
     # Save models checkpoints
     states = {'netG_A2B': netG_A2B.state_dict(),

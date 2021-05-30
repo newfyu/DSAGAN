@@ -128,7 +128,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         # Identity loss
         same_A = netG_B2A(real_A)
-        loss_identity_A = criterion_identity(same_A, real_A) * 1.0
+        loss_identity_A = criterion_identity(same_A, real_A) * 5.0
 
         # GAN loss
         fake_A = netG_B2A(real_B)
@@ -172,8 +172,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Image sample
     with torch.no_grad():
-        fake_A = netG_B2A(real_B)
-        imgcat = torch.cat((fake_B,fake_A),dim=2)
+        fake_A = netG_B2A(fix_B)
+        imgcat = torch.cat((fix_B,fake_A),dim=2)
         imgcat = torchvision.utils.make_grid(imgcat,normalize=True)
         torchvision.utils.save_image(imgcat, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
 
