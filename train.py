@@ -209,9 +209,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
         ###################################
 
         # Progress report (http://localhost:8097) "python -m visdom.server"
+        pbar.set_description(f'Epoch:{epoch}')
+        pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
         if i % opt.log_step == 0:
-            pbar.set_description(f'Epoch:{epoch}')
-            pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
             mlflow.log_metrics({'loss_G': loss_G.item(), 'loss_G_identity': (loss_identity_A + loss_identity_B).item(), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A).item(), 'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB).item(), 'loss_D': (loss_D_A + loss_D_B).item()}, step=step)
 
 
@@ -225,13 +225,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
         fake_B = netG_A2B(real_A)
         fake_A = netG_B2A(real_B)
         imgcat = torch.cat((real_A,fake_B,real_B,fake_A),dim=2)
-        imgcat = torchvision.utils.make_grid(imgcat,normalize=True)
-        torchvision.utils.save_image(imgcat, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
-    # Image sample
-    with torch.no_grad():
-        fake_B = netG_A2B(fix_A)
-        fake_A = netG_B2A(fix_B)
-        imgcat = torch.cat((fix_A,fake_B,fix_B,fake_A),dim=2)
         imgcat = torchvision.utils.make_grid(imgcat,normalize=True)
         torchvision.utils.save_image(imgcat, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
 

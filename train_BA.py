@@ -160,9 +160,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         optimizer_D_A.step()
         ###################################
+        pbar.set_description(f'Epoch:{epoch}')
+        pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A:.4}, G={loss_GAN_B2A:.4},  D={loss_D_A:.4}')
         if i % opt.log_step == 0:
-            pbar.set_description(f'Epoch:{epoch}')
-            pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A:.4}, G={loss_GAN_B2A:.4},  D={loss_D_A:.4}')
             mlflow.log_metrics({'loss_G': loss_G.item(), 'loss_G_identity': loss_identity_A.item(), 'loss_G_GAN': loss_GAN_B2A.item(), 'loss_D': loss_D_A.item()}, step=step)
 
 
