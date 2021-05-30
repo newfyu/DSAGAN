@@ -14,6 +14,7 @@ import mlflow
 
 from datasets import ImageDataset
 from models import Discriminator, Generator
+from unet import UNet
 from utils import LambdaLR, Logger, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
@@ -39,8 +40,10 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-netG_A2B = Generator(opt.input_nc, opt.output_nc)
-netG_B2A = Generator(opt.output_nc, opt.input_nc)
+#  netG_A2B = Generator(opt.input_nc, opt.output_nc)
+#  netG_B2A = Generator(opt.output_nc, opt.input_nc)
+netG_A2B = UNet(opt.input_nc, opt.output_nc)
+netG_B2A = UNet(opt.output_nc, opt.input_nc)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 

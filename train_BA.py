@@ -11,6 +11,7 @@ from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import mlflow
+from unet import UNet
 
 from datasets import ImageDataset
 from models import Discriminator, Generator
@@ -39,14 +40,15 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-netG_B2A = Generator(opt.output_nc, opt.input_nc)
+#  netG_B2A = Generator(opt.output_nc, opt.input_nc)
+netG_B2A = UNet(opt.output_nc, opt.input_nc)
 netD_A = Discriminator(opt.input_nc)
 
 if opt.device != 'cpu':
     netG_B2A.to(device)
     netD_A.to(device)
 
-netG_B2A.apply(weights_init_normal)
+#  netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 
 # Lossess
