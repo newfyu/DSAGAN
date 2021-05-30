@@ -26,6 +26,7 @@ class UNet(nn.Module):
         self.outc = OutConv(dim, n_classes)
 
     def forward(self, x):
+        res = x
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -36,4 +37,4 @@ class UNet(nn.Module):
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         logits = self.outc(x)
-        return logits
+        return logits + res
