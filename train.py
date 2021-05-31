@@ -14,8 +14,8 @@ import mlflow
 
 from datasets import ImageDataset
 from models import Discriminator, Generator
-from unet import UNet
-from utils import LambdaLR, Logger, ReplayBuffer, weights_init_normal
+from models import UNet
+from utils import LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
@@ -110,7 +110,7 @@ fake_A_buffer = ReplayBuffer()
 fake_B_buffer = ReplayBuffer()
 
 # Dataset loader
-transforms_ = [transforms.RandomResizedCrop(256, scale=(0.6, 1.4), interpolation=Image.BICUBIC),
+transforms_ = [transforms.RandomResizedCrop(opt.size, scale=(0.6, 1.4), interpolation=Image.BICUBIC),
                transforms.RandomHorizontalFlip(p=0.2),
                transforms.ColorJitter(0.2, 0.2),
                transforms.ToTensor(),
