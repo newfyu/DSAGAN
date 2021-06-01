@@ -7,12 +7,30 @@ from torch.autograd import Variable
 import torch
 #  from visdom import Visdom
 import numpy as np
+import mlflow
+import shutil
 
 def tensor2image(tensor):
     image = 127.5*(tensor[0].cpu().float().numpy() + 1.0)
     if image.shape[0] == 1:
         image = np.tile(image, (3,1,1))
     return image.astype(np.uint8)
+
+class logger():
+    def __init__(self, exp_name, run_name):
+        mlflow.set_experiment(opt.exp_name)
+        run = mlflow.start_run(run_name=opt.name)
+        run_id = run.info.run_id
+        experiment_id = run.info.experiment_id
+        run_dir = f'mlruns/{experiment_id}/{run_id}'
+        art_dir = f"{run_dir}/artifacts"
+        ckpt_path = f"{run_dir}/last.ckpt" 
+        mlflow.log_params(vars(opt))
+        source_code = [i for i in os.listdir() if ".py" in i]
+        for i in source_code:
+            shutil.copy(i, f"{art_dir}/{i}")
+        
+
 
 class ReplayBuffer():
     def __init__(self, max_size=50):

@@ -42,8 +42,8 @@ device = torch.device(opt.device)
 # Networks
 #  netG_A2B = Generator(opt.input_nc, opt.output_nc)
 #  netG_B2A = Generator(opt.output_nc, opt.input_nc)
-netG_A2B = UNet(opt.input_nc, opt.output_nc)
-netG_B2A = UNet(opt.output_nc, opt.input_nc)
+netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=32)
+netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
@@ -75,8 +75,9 @@ mlflow.set_experiment(opt.exp_name)
 run = mlflow.start_run(run_name=opt.name)
 run_id = run.info.run_id
 experiment_id = run.info.experiment_id
-art_dir = f"mlruns/{experiment_id}/{run_id}/artifacts"
-ckpt_path = f"mlruns/{experiment_id}/{run_id}/last.ckpt" 
+run_dir = f'mlruns/{experiment_id}/{run_id}'
+art_dir = f"{run_dir}/artifacts"
+ckpt_path = f"{run_dir}/last.ckpt" 
 mlflow.log_params(vars(opt))
 source_code = [i for i in os.listdir() if ".py" in i]
 for i in source_code:
@@ -114,13 +115,12 @@ transforms_ = [transforms.RandomResizedCrop(opt.size, scale=(0.6, 1.4), interpol
                transforms.RandomHorizontalFlip(p=0.2),
                transforms.ColorJitter(0.2, 0.2),
                transforms.ToTensor(),
-               transforms.Normalize((0.5,), (0.5,)),
-               ]
+               transforms.Normalize((0.5,), (0.5,))]
 dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
                         batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu,drop_last=True)
 
 simple_dl = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
-                        batch_size=4, shuffle=False, num_workers=opt.n_cpu)
+                        batch_size=8, shuffle=False, num_workers=opt.n_cpu)
 fix_sample = next(iter(simple_dl))
 fix_A = fix_sample['A'].to(device)
 fix_B = fix_sample['B'].to(device)
@@ -225,13 +225,16 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Image sample
     with torch.no_grad():
-        fake_B = netG_A2B(fix_A)
-        fake_A = netG_B2A(fix_B)
-        imgs = torch.cat((fix_A,fake_B,fix_B,fake_A),dim=2)
-        imgs = torchvision.utils.make_grid(imgs,normalize=True)
+        #  fake_B = netG_A2B(fix_A)
+        out = netG_B2A.model(fix_B)
+        fake_A = out + fix_B
+        out2 = (out>0).float()
+        #  imgs = torch.cat((fix_A,fake_B,fix_B,fake_A),dim=2)
+        imgs = torch.cat((fix_B,fake_A,out, out2),dim=2)
+        imgs = torchvision.utils.make_grid(imgs,normalize=True,nrow=4)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
 
-    # Save models checkpoints
+    # Save last checkpoints
     states = {'netG_A2B': netG_A2B.state_dict(),
               'netG_B2A': netG_B2A.state_dict(),
               'netD_A': netD_A.state_dict(),
@@ -242,5 +245,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
               'current_epoch': epoch}
     torch.save(states, ckpt_path)
 
+    # save every epoch for B2A
+    states = {'netG_B2A': netG_B2A.state_dict()}
+    torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 
 mlflow.end_run()
