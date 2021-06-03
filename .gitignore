@@ -111,3 +111,5 @@ ckpt
 bak
 output/
 mlruns/
+gif/
+goodckpt/

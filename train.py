@@ -15,7 +15,7 @@ import mlflow
 from datasets import ImageDataset
 from models import Discriminator, Generator
 from models import UNet
-from utils import LambdaLR, ReplayBuffer, weights_init_normal
+from utils import LambdaLR, ReplayBuffer, weights_init_normal, EMA
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
@@ -47,17 +47,21 @@ netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
+# EMA model
+ema_updater = EMA(0.995)
+netE = UNet(opt.output_nc, opt.input_nc, dim=32)
+
 if opt.device != 'cpu':
     netG_A2B.to(device)
     netG_B2A.to(device)
     netD_A.to(device)
     netD_B.to(device)
+    netE.to(device)
 
 #  netG_A2B.apply(weights_init_normal)
 #  netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
-
 
 # Lossess
 criterion_GAN = torch.nn.MSELoss()
@@ -74,6 +78,7 @@ optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=opt.lr, betas=(0.5, 0.9
 mlflow.set_experiment(opt.exp_name)
 run = mlflow.start_run(run_name=opt.name)
 run_id = run.info.run_id
+print('run id: ',run_id)
 experiment_id = run.info.experiment_id
 run_dir = f'mlruns/{experiment_id}/{run_id}'
 art_dir = f"{run_dir}/artifacts"
@@ -130,11 +135,9 @@ fix_B = fix_sample['B'].to(device)
 ###### Training ######
 step = 0
 for epoch in range(opt.epoch, opt.n_epochs):
-
-
-    step += 1
     pbar = tqdm(dataloader)
     for i, batch in enumerate(pbar):
+        step += 1
         # Set model input
         real_A = Variable(input_A.copy_(batch['A']))
         real_B = Variable(input_B.copy_(batch['B']))
@@ -210,8 +213,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
         optimizer_D_B.step()
         ###################################
+        # ema update
+        if step!=0 and step % 10 == 0 and step > 200:
+            ema_updater.update_moving_average(netE, netG_B2A)
 
-        # Progress report (http://localhost:8097) "python -m visdom.server"
         pbar.set_description(f'Epoch:{epoch}')
         pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
         if i % opt.log_step == 0:
@@ -228,10 +233,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
         #  fake_B = netG_A2B(fix_A)
         out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
-        out2 = (out>0).float()
+        out2 = (out>0.01).float()
+        
+        out_ema = netE.model(fix_B)
+        fake_E = out_ema + fix_B
+        out_ema2 = (out_ema>0.01).float()
+        
         #  imgs = torch.cat((fix_A,fake_B,fix_B,fake_A),dim=2)
-        imgs = torch.cat((fix_B,fake_A,out, out2),dim=2)
-        imgs = torchvision.utils.make_grid(imgs,normalize=True,nrow=4)
+        imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
+        imgs = torchvision.utils.make_grid(imgs,normalize=True,nrow=8)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
 
     # Save last checkpoints
@@ -239,6 +249,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
               'netG_B2A': netG_B2A.state_dict(),
               'netD_A': netD_A.state_dict(),
               'netD_B': netD_B.state_dict(),
+              'netE': netE.state_dict(),
               'optimizer_G': optimizer_G.state_dict(),
               'optimizer_D_A': optimizer_D_A.state_dict(),
               'optimizer_D_B': optimizer_D_B.state_dict(),
@@ -246,7 +257,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
     torch.save(states, ckpt_path)
 
     # save every epoch for B2A
-    states = {'netG_B2A': netG_B2A.state_dict()}
+    states = {'netG_B2A': netG_B2A.state_dict(),
+              'netE': netE.state_dict()}
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 
 mlflow.end_run()

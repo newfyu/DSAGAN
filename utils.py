@@ -72,3 +72,19 @@ def weights_init_normal(m):
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant(m.bias.data, 0.0)
 
+class EMA():
+    def __init__(self, beta):
+        super().__init__()
+        self.beta = beta
+        self.started= False
+
+    def update_average(self, old, new):
+        if not self.started:
+            self.started= True
+            return new
+        return old * self.beta + (1 - self.beta) * new
+
+    def update_moving_average(self, ma_model, current_model):
+        for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
+            old_weight, up_weight = ma_params.data, current_params.data
+            ma_params.data = self.update_average(old_weight, up_weight)
