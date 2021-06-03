@@ -39,26 +39,17 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-#  netG_A2B = Generator(opt.input_nc, opt.output_nc)
-#  netG_B2A = Generator(opt.output_nc, opt.input_nc)
 netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=32)
 netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
-
-# EMA model
-#  ema_updater = EMA(0.995)
-#  netE = UNet(opt.output_nc, opt.input_nc, dim=32)
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
     netG_B2A.to(device)
     netD_A.to(device)
     netD_B.to(device)
-    #  netE.to(device)
 
-#  netG_A2B.apply(weights_init_normal)
-#  netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
 
@@ -87,7 +78,7 @@ source_code = [i for i in os.listdir() if ".py" in i]
 for i in source_code:
     shutil.copy(i, f"{art_dir}/{i}")
 
-# Load from ckpt
+# Load from checkpoint
 if opt.resume_from_checkpoint is not None:
     checkpoint = torch.load(opt.resume_from_checkpoint)
     opt.epoch = checkpoint['current_epoch'] + 1
@@ -105,7 +96,6 @@ lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=La
 lr_scheduler_D_B = torch.optim.lr_scheduler.LambdaLR(optimizer_D_B, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
 
 # Inputs & targets memory allocation
-#  Tensor = torch.cuda.FloatTensor if opt.cuda else torch.Tensor
 input_A = torch.FloatTensor(opt.batch_size, opt.input_nc, opt.size, opt.size).to(device)
 input_B = torch.FloatTensor(opt.batch_size, opt.output_nc, opt.size, opt.size).to(device)
 target_real = Variable(torch.FloatTensor(opt.batch_size, 1).fill_(1.0), requires_grad=False).to(device)
@@ -228,16 +218,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Image sample
     with torch.no_grad():
-        #  fake_B = netG_A2B(fix_A)
         out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
         out2 = (out > 0.01).float()
-
-        #  out_ema = netE.model(fix_B)
-        #  fake_E = out_ema + fix_B
-        #  out_ema2 = (out_ema>0.01).float()
-
-        #  imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
         imgs = torch.cat((fix_B, fake_A, out, out2),dim=2)
         imgs = torchvision.utils.make_grid(imgs, normalize=True, nrow=8)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
@@ -247,16 +230,14 @@ for epoch in range(opt.epoch, opt.n_epochs):
               'netG_B2A': netG_B2A.state_dict(),
               'netD_A': netD_A.state_dict(),
               'netD_B': netD_B.state_dict(),
-              #  'netE': netE.state_dict(),
               'optimizer_G': optimizer_G.state_dict(),
               'optimizer_D_A': optimizer_D_A.state_dict(),
               'optimizer_D_B': optimizer_D_B.state_dict(),
               'current_epoch': epoch}
     torch.save(states, ckpt_path)
 
-    # save every epoch for B2A
+    # Save every epoch for B2A
     states = {'netG_B2A': netG_B2A.state_dict()}
-    #  'netE': netE.state_dict()}
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 
 mlflow.end_run()
