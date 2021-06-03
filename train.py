@@ -3,6 +3,7 @@ import itertools
 import os
 import shutil
 
+import mlflow
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -10,12 +11,10 @@ from PIL import Image
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import mlflow
 
 from datasets import ImageDataset
-from models import Discriminator, Generator
-from models import UNet
-from utils import LambdaLR, ReplayBuffer, weights_init_normal, EMA
+from models import Discriminator, Generator, UNet
+from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
@@ -48,15 +47,15 @@ netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
 # EMA model
-ema_updater = EMA(0.995)
-netE = UNet(opt.output_nc, opt.input_nc, dim=32)
+#  ema_updater = EMA(0.995)
+#  netE = UNet(opt.output_nc, opt.input_nc, dim=32)
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
     netG_B2A.to(device)
     netD_A.to(device)
     netD_B.to(device)
-    netE.to(device)
+    #  netE.to(device)
 
 #  netG_A2B.apply(weights_init_normal)
 #  netG_B2A.apply(weights_init_normal)
@@ -78,11 +77,11 @@ optimizer_D_B = torch.optim.Adam(netD_B.parameters(), lr=opt.lr, betas=(0.5, 0.9
 mlflow.set_experiment(opt.exp_name)
 run = mlflow.start_run(run_name=opt.name)
 run_id = run.info.run_id
-print('run id: ',run_id)
+print('run id: ', run_id)
 experiment_id = run.info.experiment_id
 run_dir = f'mlruns/{experiment_id}/{run_id}'
 art_dir = f"{run_dir}/artifacts"
-ckpt_path = f"{run_dir}/last.ckpt" 
+ckpt_path = f"{run_dir}/last.ckpt"
 mlflow.log_params(vars(opt))
 source_code = [i for i in os.listdir() if ".py" in i]
 for i in source_code:
@@ -122,10 +121,10 @@ transforms_ = [transforms.RandomResizedCrop(opt.size, scale=(0.6, 1.4), interpol
                transforms.ToTensor(),
                transforms.Normalize((0.5,), (0.5,))]
 dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
-                        batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu,drop_last=True)
+                        batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu, drop_last=True)
 
 simple_dl = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
-                        batch_size=8, shuffle=False, num_workers=opt.n_cpu)
+                       batch_size=8, shuffle=False, num_workers=opt.n_cpu)
 fix_sample = next(iter(simple_dl))
 fix_A = fix_sample['A'].to(device)
 fix_B = fix_sample['B'].to(device)
@@ -214,14 +213,13 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_D_B.step()
         ###################################
         # ema update
-        if step!=0 and step % 10 == 0 and step > 200:
-            ema_updater.update_moving_average(netE, netG_B2A)
+        #  if step!=0 and step % 10 == 0 and step > 200:
+        #  ema_updater.update_moving_average(netE, netG_B2A)
 
         pbar.set_description(f'Epoch:{epoch}')
         pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
         if i % opt.log_step == 0:
             mlflow.log_metrics({'loss_G': loss_G.item(), 'loss_G_identity': (loss_identity_A + loss_identity_B).item(), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A).item(), 'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB).item(), 'loss_D': (loss_D_A + loss_D_B).item()}, step=step)
-
 
     # Update learning rates
     lr_scheduler_G.step()
@@ -233,15 +231,15 @@ for epoch in range(opt.epoch, opt.n_epochs):
         #  fake_B = netG_A2B(fix_A)
         out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
-        out2 = (out>0.01).float()
-        
-        out_ema = netE.model(fix_B)
-        fake_E = out_ema + fix_B
-        out_ema2 = (out_ema>0.01).float()
-        
-        #  imgs = torch.cat((fix_A,fake_B,fix_B,fake_A),dim=2)
-        imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
-        imgs = torchvision.utils.make_grid(imgs,normalize=True,nrow=8)
+        out2 = (out > 0.01).float()
+
+        #  out_ema = netE.model(fix_B)
+        #  fake_E = out_ema + fix_B
+        #  out_ema2 = (out_ema>0.01).float()
+
+        #  imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
+        imgs = torch.cat((fix_B, fake_A, out, out2),dim=2)
+        imgs = torchvision.utils.make_grid(imgs, normalize=True, nrow=8)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
 
     # Save last checkpoints
@@ -249,7 +247,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
               'netG_B2A': netG_B2A.state_dict(),
               'netD_A': netD_A.state_dict(),
               'netD_B': netD_B.state_dict(),
-              'netE': netE.state_dict(),
+              #  'netE': netE.state_dict(),
               'optimizer_G': optimizer_G.state_dict(),
               'optimizer_D_A': optimizer_D_A.state_dict(),
               'optimizer_D_B': optimizer_D_B.state_dict(),
@@ -257,8 +255,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
     torch.save(states, ckpt_path)
 
     # save every epoch for B2A
-    states = {'netG_B2A': netG_B2A.state_dict(),
-              'netE': netE.state_dict()}
+    states = {'netG_B2A': netG_B2A.state_dict()}
+    #  'netE': netE.state_dict()}
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 
 mlflow.end_run()
