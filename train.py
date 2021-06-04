@@ -13,20 +13,22 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from datasets import ImageDataset
-from models import Discriminator, Generator, UNet
+from models import Discriminator, UNet
 from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs of training')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v2/', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
+parser.add_argument('--decay_epoch', type=int, default=20, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=256, help='size of the data crop (squared assumed)')
 parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
+parser.add_argument('--nd', type=int, default=1, help='train the discriminator every nd steps')
+parser.add_argument('--ng', type=int, default=1, help='train the generator every ng steps')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
 parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
 parser.add_argument('--exp_name', type=str, help='trial name', default='Default')
@@ -44,12 +46,19 @@ netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
+# EMA model
+ema_updater = EMA(0.995)
+netE = UNet(opt.output_nc, opt.input_nc, dim=32)
+
 if opt.device != 'cpu':
     netG_A2B.to(device)
     netG_B2A.to(device)
     netD_A.to(device)
     netD_B.to(device)
+    netE.to(device)
 
+#  netG_A2B.apply(weights_init_normal)
+#  netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
 
@@ -132,79 +141,81 @@ for epoch in range(opt.epoch, opt.n_epochs):
         real_B = Variable(input_B.copy_(batch['B']))
 
         ###### Generators A2B and B2A ######
-        optimizer_G.zero_grad()
+        if step % opt.ng == 0:
+            optimizer_G.zero_grad()
 
-        # Identity loss
-        #  G_A2B(B) should equal B if real B is fed
-        same_B = netG_A2B(real_B)
-        loss_identity_B = criterion_identity(same_B, real_B) * 5.0
-        # G_B2A(A) should equal A if real A is fed
-        same_A = netG_B2A(real_A)
-        loss_identity_A = criterion_identity(same_A, real_A) * 5.0
+            # Identity loss
+            #  G_A2B(B) should equal B if real B is fed
+            same_B = netG_A2B(real_B)
+            loss_identity_B = criterion_identity(same_B, real_B) * 5.0
+            # G_B2A(A) should equal A if real A is fed
+            same_A = netG_B2A(real_A)
+            loss_identity_A = criterion_identity(same_A, real_A) * 5.0
 
-        # GAN loss
-        fake_B = netG_A2B(real_A)
-        pred_fake = netD_B(fake_B)
-        loss_GAN_A2B = criterion_GAN(pred_fake, target_real)
+            # GAN loss
+            fake_B = netG_A2B(real_A)
+            pred_fake = netD_B(fake_B)
+            loss_GAN_A2B = criterion_GAN(pred_fake, target_real)
 
-        fake_A = netG_B2A(real_B)
-        pred_fake = netD_A(fake_A)
-        loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
+            fake_A = netG_B2A(real_B)
+            pred_fake = netD_A(fake_A)
+            loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
 
-        # Cycle loss
-        recovered_A = netG_B2A(fake_B)
-        loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * 10.0
+            # Cycle loss
+            recovered_A = netG_B2A(fake_B)
+            loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * 10.0
 
-        recovered_B = netG_A2B(fake_A)
-        loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * 10.0
+            recovered_B = netG_A2B(fake_A)
+            loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * 10.0
 
-        # Total loss
-        loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
-        loss_G.backward()
+            # Total loss
+            loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
+            loss_G.backward()
 
-        optimizer_G.step()
+            optimizer_G.step()
         ###################################
 
         ###### Discriminator A ######
-        optimizer_D_A.zero_grad()
+        if step % opt.nd == 0:
+            optimizer_D_A.zero_grad()
 
-        # Real loss
-        pred_real = netD_A(real_A)
-        loss_D_real = criterion_GAN(pred_real, target_real)
+            # Real loss
+            pred_real = netD_A(real_A)
+            loss_D_real = criterion_GAN(pred_real, target_real)
 
-        # Fake loss
-        fake_A = fake_A_buffer.push_and_pop(fake_A)
-        pred_fake = netD_A(fake_A.detach())
-        loss_D_fake = criterion_GAN(pred_fake, target_fake)
+            # Fake loss
+            fake_A = fake_A_buffer.push_and_pop(fake_A)
+            pred_fake = netD_A(fake_A.detach())
+            loss_D_fake = criterion_GAN(pred_fake, target_fake)
 
-        # Total loss
-        loss_D_A = (loss_D_real + loss_D_fake) * 0.5
-        loss_D_A.backward()
+            # Total loss
+            loss_D_A = (loss_D_real + loss_D_fake) * 0.5
+            loss_D_A.backward()
 
-        optimizer_D_A.step()
-        ###################################
+            optimizer_D_A.step()
+            ###################################
 
-        ###### Discriminator B ######
-        optimizer_D_B.zero_grad()
+            ###### Discriminator B ######
+            optimizer_D_B.zero_grad()
 
-        # Real loss
-        pred_real = netD_B(real_B)
-        loss_D_real = criterion_GAN(pred_real, target_real)
+            # Real loss
+            pred_real = netD_B(real_B)
+            loss_D_real = criterion_GAN(pred_real, target_real)
 
-        # Fake loss
-        fake_B = fake_B_buffer.push_and_pop(fake_B)
-        pred_fake = netD_B(fake_B.detach())
-        loss_D_fake = criterion_GAN(pred_fake, target_fake)
+            # Fake loss
+            fake_B = fake_B_buffer.push_and_pop(fake_B)
+            pred_fake = netD_B(fake_B.detach())
+            loss_D_fake = criterion_GAN(pred_fake, target_fake)
 
-        # Total loss
-        loss_D_B = (loss_D_real + loss_D_fake) * 0.5
-        loss_D_B.backward()
+            # Total loss
+            loss_D_B = (loss_D_real + loss_D_fake) * 0.5
+            loss_D_B.backward()
 
-        optimizer_D_B.step()
+            optimizer_D_B.step()
         ###################################
         # ema update
-        #  if step!=0 and step % 10 == 0 and step > 200:
-        #  ema_updater.update_moving_average(netE, netG_B2A)
+        if step!=0 and step % 10 == 0 and step > 200:
+            ema_updater.update_moving_average(netE, netG_B2A)
 
         pbar.set_description(f'Epoch:{epoch}')
         pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
@@ -218,18 +229,24 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Image sample
     with torch.no_grad():
+        netG_B2A.eval()
         out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
         out2 = (out > 0.01).float()
-        imgs = torch.cat((fix_B, fake_A, out, out2),dim=2)
+        out_ema = netE.model(fix_B)
+        fake_E = out_ema + fix_B
+        out_ema2 = (out_ema>0.01).float()
+        imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
         imgs = torchvision.utils.make_grid(imgs, normalize=True, nrow=8)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
+        netG_B2A.train()
 
     # Save last checkpoints
     states = {'netG_A2B': netG_A2B.state_dict(),
               'netG_B2A': netG_B2A.state_dict(),
               'netD_A': netD_A.state_dict(),
               'netD_B': netD_B.state_dict(),
+              'netE': netE.state_dict(),
               'optimizer_G': optimizer_G.state_dict(),
               'optimizer_D_A': optimizer_D_A.state_dict(),
               'optimizer_D_B': optimizer_D_B.state_dict(),
@@ -237,7 +254,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
     torch.save(states, ckpt_path)
 
     # Save every epoch for B2A
-    states = {'netG_B2A': netG_B2A.state_dict()}
+    states = {'netG_B2A': netG_B2A.state_dict(),
+              'netE': netE.state_dict()}
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 
 mlflow.end_run()
