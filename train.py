@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from datasets import ImageDataset
-from models import Discriminator, UNet
+from models import Discriminator, Generator, UNet, SAGANDiscriminator
 from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
@@ -41,14 +41,19 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=32)
-netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
+netG_A2B = Generator(opt.input_nc, opt.output_nc)
+netG_B2A = Generator(opt.output_nc, opt.input_nc)
+#  netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=32)
+#  netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
+#  netD_A = SAGANDiscriminator(opt.output_nc,step_channels=32)
+#  netD_B = SAGANDiscriminator(opt.output_nc,step_channels=32)
 
 # EMA model
 ema_updater = EMA(0.995)
-netE = UNet(opt.output_nc, opt.input_nc, dim=32)
+#  netE = UNet(opt.output_nc, opt.input_nc, dim=32)
+netE = Generator(opt.output_nc, opt.input_nc)
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
@@ -57,8 +62,8 @@ if opt.device != 'cpu':
     netD_B.to(device)
     netE.to(device)
 
-#  netG_A2B.apply(weights_init_normal)
-#  netG_B2A.apply(weights_init_normal)
+netG_A2B.apply(weights_init_normal)
+netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
 
@@ -141,76 +146,77 @@ for epoch in range(opt.epoch, opt.n_epochs):
         real_B = Variable(input_B.copy_(batch['B']))
 
         ###### Generators A2B and B2A ######
+        optimizer_G.zero_grad()
+
+        # Identity loss
+        #  G_A2B(B) should equal B if real B is fed
+        same_B = netG_A2B(real_B)
+        loss_identity_B = criterion_identity(same_B, real_B) * 5.0
+        # G_B2A(A) should equal A if real A is fed
+        same_A = netG_B2A(real_A)
+        loss_identity_A = criterion_identity(same_A, real_A) * 5.0
+
+        # GAN loss
+        fake_B = netG_A2B(real_A)
+        pred_fake = netD_B(fake_B)
+        loss_GAN_A2B = criterion_GAN(pred_fake, target_real)
+
+        fake_A = netG_B2A(real_B)
+        pred_fake = netD_A(fake_A)
+        loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
+
+        # Cycle loss
+        recovered_A = netG_B2A(fake_B)
+        loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * 10.0
+
+        recovered_B = netG_A2B(fake_A)
+        loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * 10.0
+
+        # Total loss
+        loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
+        loss_G.backward()
+
         if step % opt.ng == 0:
-            optimizer_G.zero_grad()
-
-            # Identity loss
-            #  G_A2B(B) should equal B if real B is fed
-            same_B = netG_A2B(real_B)
-            loss_identity_B = criterion_identity(same_B, real_B) * 5.0
-            # G_B2A(A) should equal A if real A is fed
-            same_A = netG_B2A(real_A)
-            loss_identity_A = criterion_identity(same_A, real_A) * 5.0
-
-            # GAN loss
-            fake_B = netG_A2B(real_A)
-            pred_fake = netD_B(fake_B)
-            loss_GAN_A2B = criterion_GAN(pred_fake, target_real)
-
-            fake_A = netG_B2A(real_B)
-            pred_fake = netD_A(fake_A)
-            loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
-
-            # Cycle loss
-            recovered_A = netG_B2A(fake_B)
-            loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * 10.0
-
-            recovered_B = netG_A2B(fake_A)
-            loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * 10.0
-
-            # Total loss
-            loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
-            loss_G.backward()
-
             optimizer_G.step()
         ###################################
 
         ###### Discriminator A ######
+        optimizer_D_A.zero_grad()
+
+        # Real loss
+        pred_real = netD_A(real_A)
+        loss_D_real = criterion_GAN(pred_real, target_real)
+
+        # Fake loss
+        fake_A = fake_A_buffer.push_and_pop(fake_A)
+        pred_fake = netD_A(fake_A.detach())
+        loss_D_fake = criterion_GAN(pred_fake, target_fake)
+
+        # Total loss
+        loss_D_A = (loss_D_real + loss_D_fake) * 0.5
+        loss_D_A.backward()
+
         if step % opt.nd == 0:
-            optimizer_D_A.zero_grad()
-
-            # Real loss
-            pred_real = netD_A(real_A)
-            loss_D_real = criterion_GAN(pred_real, target_real)
-
-            # Fake loss
-            fake_A = fake_A_buffer.push_and_pop(fake_A)
-            pred_fake = netD_A(fake_A.detach())
-            loss_D_fake = criterion_GAN(pred_fake, target_fake)
-
-            # Total loss
-            loss_D_A = (loss_D_real + loss_D_fake) * 0.5
-            loss_D_A.backward()
-
             optimizer_D_A.step()
-            ###################################
+        ###################################
 
-            ###### Discriminator B ######
-            optimizer_D_B.zero_grad()
+        ###### Discriminator B ######
+        optimizer_D_B.zero_grad()
 
-            # Real loss
-            pred_real = netD_B(real_B)
-            loss_D_real = criterion_GAN(pred_real, target_real)
+        # Real loss
+        pred_real = netD_B(real_B)
+        loss_D_real = criterion_GAN(pred_real, target_real)
 
-            # Fake loss
-            fake_B = fake_B_buffer.push_and_pop(fake_B)
-            pred_fake = netD_B(fake_B.detach())
-            loss_D_fake = criterion_GAN(pred_fake, target_fake)
+        # Fake loss
+        fake_B = fake_B_buffer.push_and_pop(fake_B)
+        pred_fake = netD_B(fake_B.detach())
+        loss_D_fake = criterion_GAN(pred_fake, target_fake)
 
-            # Total loss
-            loss_D_B = (loss_D_real + loss_D_fake) * 0.5
-            loss_D_B.backward()
+        # Total loss
+        loss_D_B = (loss_D_real + loss_D_fake) * 0.5
+        loss_D_B.backward()
 
+        if step % opt.nd == 0:
             optimizer_D_B.step()
         ###################################
         # ema update
@@ -233,10 +239,12 @@ for epoch in range(opt.epoch, opt.n_epochs):
         out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
         out2 = (out > 0.01).float()
+        # gen ema image
         out_ema = netE.model(fix_B)
         fake_E = out_ema + fix_B
         out_ema2 = (out_ema>0.01).float()
         imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
+        #  imgs = torch.cat((fix_B, fake_A, out, out2),dim=2)
         imgs = torchvision.utils.make_grid(imgs, normalize=True, nrow=8)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
         netG_B2A.train()
