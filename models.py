@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchgan.layers import SelfAttention2d, SpectralNorm2d
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_features):
