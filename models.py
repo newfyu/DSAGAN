@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchgan.layers import SelfAttention2d, SpectralNorm2d
+
 class ResidualBlock(nn.Module):
     def __init__(self, in_features):
         super(ResidualBlock, self).__init__()
@@ -94,6 +95,7 @@ class Discriminator(nn.Module):
         x = self.model(x)
         # Average pooling and flatten
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
+        return x
 
 
 class UNet(nn.Module):
@@ -141,10 +143,12 @@ class DoubleConv(nn.Module):
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(mid_channels),
+            #  nn.BatchNorm2d(mid_channels),
+            nn.InstanceNorm2d(mid_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            #  nn.BatchNorm2d(out_channels),
+            nn.InstanceNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -204,40 +208,3 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 
-class SAGANDiscriminator(nn.Module):
-    def __init__(self, input_dims=1, step_channels=64):
-        super().__init__()
-        d = step_channels
-        self.model = nn.Sequential(
-            SpectralNorm2d(nn.Conv2d(input_dims, d, 4, 2, 1, bias=True)),
-            nn.BatchNorm2d(d),
-            nn.LeakyReLU(0.2),
-
-            SpectralNorm2d(nn.Conv2d(d, d * 2, 4, 2, 1, bias=True)),
-            nn.BatchNorm2d(d * 2),
-            nn.LeakyReLU(0.2),
-
-            SpectralNorm2d(nn.Conv2d(d * 2, d * 4, 4, 2, 1, bias=True)),
-            nn.BatchNorm2d(d * 4),
-            nn.LeakyReLU(0.2),
-
-            SelfAttention2d(d * 4),
-            SpectralNorm2d(nn.Conv2d(d * 4, d * 8, 4, 2, 1, bias=True)),
-            nn.BatchNorm2d(d * 8),
-
-            SelfAttention2d(d * 8),
-            SpectralNorm2d(nn.Conv2d(d * 8, 1, 4, 1, 0, bias=True)),
-        )
-
-    def forward(self, x):
-        x = self.model(x)
-        return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
-
-
-if __name__ == "__main__":
-    net = SAGANDiscriminator(1, 32)
-    net1 = Discriminator(1)
-    x = torch.randn(1, 1, 512, 512)
-    import ipdb
-    ipdb.set_trace()
-    pass

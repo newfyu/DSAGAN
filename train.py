@@ -13,24 +13,26 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from datasets import ImageDataset
-from models import Discriminator, Generator, UNet, SAGANDiscriminator
+from models import Discriminator, Generator, UNet
 from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
-parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v2/', help='root directory of the dataset')
+parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v4/', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--decay_epoch', type=int, default=20, help='epoch to start linearly decaying the learning rate to 0')
+parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=256, help='size of the data crop (squared assumed)')
 parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
 parser.add_argument('--nd', type=int, default=1, help='train the discriminator every nd steps')
 parser.add_argument('--ng', type=int, default=1, help='train the generator every ng steps')
+parser.add_argument('--dim', type=int, default=64, help='network base dim')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
 parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
+parser.add_argument('--ema_step', type=int, default=20000, help='ema start step')
 parser.add_argument('--exp_name', type=str, help='trial name', default='Default')
 parser.add_argument('--name', type=str, help='trial name', required=True)
 parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='resume train from checkpoint')
@@ -41,19 +43,17 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-netG_A2B = Generator(opt.input_nc, opt.output_nc)
-netG_B2A = Generator(opt.output_nc, opt.input_nc)
-#  netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=32)
-#  netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=32)
+#  netG_A2B = Generator(opt.input_nc, opt.output_nc)
+#  netG_B2A = Generator(opt.output_nc, opt.input_nc)
+netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim)
+netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
-#  netD_A = SAGANDiscriminator(opt.output_nc,step_channels=32)
-#  netD_B = SAGANDiscriminator(opt.output_nc,step_channels=32)
 
 # EMA model
 ema_updater = EMA(0.995)
-#  netE = UNet(opt.output_nc, opt.input_nc, dim=32)
-netE = Generator(opt.output_nc, opt.input_nc)
+netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim)
+#  netE = Generator(opt.output_nc, opt.input_nc)
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
@@ -62,8 +62,8 @@ if opt.device != 'cpu':
     netD_B.to(device)
     netE.to(device)
 
-netG_A2B.apply(weights_init_normal)
-netG_B2A.apply(weights_init_normal)
+#  netG_A2B.apply(weights_init_normal)
+#  netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
 
@@ -119,15 +119,10 @@ fake_A_buffer = ReplayBuffer()
 fake_B_buffer = ReplayBuffer()
 
 # Dataset loader
-transforms_ = [transforms.RandomResizedCrop(opt.size, scale=(0.6, 1.4), interpolation=Image.BICUBIC),
-               transforms.RandomHorizontalFlip(p=0.2),
-               transforms.ColorJitter(0.2, 0.2),
-               transforms.ToTensor(),
-               transforms.Normalize((0.5,), (0.5,))]
-dataloader = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
+dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size),
                         batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu, drop_last=True)
 
-simple_dl = DataLoader(ImageDataset(opt.dataroot, transforms_=transforms_, unaligned=True),
+simple_dl = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size),
                        batch_size=8, shuffle=False, num_workers=opt.n_cpu)
 fix_sample = next(iter(simple_dl))
 fix_A = fix_sample['A'].to(device)
@@ -220,7 +215,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
             optimizer_D_B.step()
         ###################################
         # ema update
-        if step!=0 and step % 10 == 0 and step > 200:
+        if step != 0 and step % 10 == 0 and step > opt.ema_step:
             ema_updater.update_moving_average(netE, netG_B2A)
 
         pbar.set_description(f'Epoch:{epoch}')
@@ -242,9 +237,11 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # gen ema image
         out_ema = netE.model(fix_B)
         fake_E = out_ema + fix_B
-        out_ema2 = (out_ema>0.01).float()
-        imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2),dim=2)
-        #  imgs = torch.cat((fix_B, fake_A, out, out2),dim=2)
+        out_ema2 = (out_ema > 0.01).float()
+        if step > ema_step:
+            imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2), dim=2)
+        else:
+            imgs = torch.cat((fix_B, fake_A, out, out2), dim=2)
         imgs = torchvision.utils.make_grid(imgs, normalize=True, nrow=8)
         torchvision.utils.save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
         netG_B2A.train()
