@@ -2,6 +2,7 @@ import argparse
 import itertools
 import os
 import shutil
+import time
 
 import mlflow
 import torch
@@ -18,11 +19,11 @@ from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=100, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs of training')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v4/', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--decay_epoch', type=int, default=50, help='epoch to start linearly decaying the learning rate to 0')
+parser.add_argument('--decay_epoch', type=int, default=30, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=256, help='size of the data crop (squared assumed)')
 parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
@@ -32,10 +33,11 @@ parser.add_argument('--ng', type=int, default=1, help='train the generator every
 parser.add_argument('--dim', type=int, default=64, help='network base dim')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
 parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
-parser.add_argument('--ema_step', type=int, default=20000, help='ema start step')
+parser.add_argument('--ema_step', type=int, default=10000, help='ema start step')
+parser.add_argument('--sleep', type=float, default=0., help='slow down train')
 parser.add_argument('--exp_name', type=str, help='trial name', default='Default')
 parser.add_argument('--name', type=str, help='trial name', required=True)
-parser.add_argument('--resume_from_checkpoint', type=str, default=None, help='resume train from checkpoint')
+parser.add_argument('--resume', type=str, default=None, help='resume from checkpoint')
 
 opt = parser.parse_args()
 print(opt)
@@ -93,8 +95,8 @@ for i in source_code:
     shutil.copy(i, f"{art_dir}/{i}")
 
 # Load from checkpoint
-if opt.resume_from_checkpoint is not None:
-    checkpoint = torch.load(opt.resume_from_checkpoint)
+if opt.resume is not None:
+    checkpoint = torch.load(opt.resume)
     opt.epoch = checkpoint['current_epoch'] + 1
     netG_A2B.load_state_dict(checkpoint['netG_A2B'])
     netG_B2A.load_state_dict(checkpoint['netG_B2A'])
@@ -103,7 +105,7 @@ if opt.resume_from_checkpoint is not None:
     optimizer_G.load_state_dict(checkpoint['optimizer_G'])
     optimizer_D_A.load_state_dict(checkpoint['optimizer_D_A'])
     optimizer_D_B.load_state_dict(checkpoint['optimizer_D_B'])
-    print(f'find ckpt, load from checkpoint: {opt.resume_from_checkpoint}, epoch is {opt.epoch}')
+    print(f'find ckpt, load from checkpoint: {opt.resume}, epoch is {opt.epoch}')
 
 lr_scheduler_G = torch.optim.lr_scheduler.LambdaLR(optimizer_G, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
 lr_scheduler_D_A = torch.optim.lr_scheduler.LambdaLR(optimizer_D_A, lr_lambda=LambdaLR(opt.n_epochs, opt.epoch, opt.decay_epoch).step)
@@ -119,10 +121,10 @@ fake_A_buffer = ReplayBuffer()
 fake_B_buffer = ReplayBuffer()
 
 # Dataset loader
-dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size),
+dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size,mode='train'),
                         batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu, drop_last=True)
 
-simple_dl = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size),
+simple_dl = DataLoader(ImageDataset(opt.dataroot, unaligned=False,size=opt.size,mode='test'),
                        batch_size=8, shuffle=False, num_workers=opt.n_cpu)
 fix_sample = next(iter(simple_dl))
 fix_A = fix_sample['A'].to(device)
@@ -222,6 +224,9 @@ for epoch in range(opt.epoch, opt.n_epochs):
         pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
         if i % opt.log_step == 0:
             mlflow.log_metrics({'loss_G': loss_G.item(), 'loss_G_identity': (loss_identity_A + loss_identity_B).item(), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A).item(), 'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB).item(), 'loss_D': (loss_D_A + loss_D_B).item()}, step=step)
+        time.sleep(opt.sleep)
+
+
 
     # Update learning rates
     lr_scheduler_G.step()
@@ -238,7 +243,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         out_ema = netE.model(fix_B)
         fake_E = out_ema + fix_B
         out_ema2 = (out_ema > 0.01).float()
-        if step > ema_step:
+        if step > opt.ema_step:
             imgs = torch.cat((fix_B, fake_A, out, out2, out_ema, out_ema2), dim=2)
         else:
             imgs = torch.cat((fix_B, fake_A, out, out2), dim=2)

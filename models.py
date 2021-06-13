@@ -81,9 +81,19 @@ class Discriminator(nn.Module):
                   nn.InstanceNorm2d(256),
                   nn.LeakyReLU(0.2, inplace=True)]
 
-        model += [nn.Conv2d(256, 512, 4, padding=1),
+        model += [nn.Conv2d(256, 512, 4, stride=2, padding=1), #注意原版这儿stride=1
                   nn.InstanceNorm2d(512),
                   nn.LeakyReLU(0.2, inplace=True)]
+
+        # 额外添加层
+        model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
+                  nn.InstanceNorm2d(512),
+                  nn.LeakyReLU(0.2, inplace=True)]
+
+        model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
+                  nn.InstanceNorm2d(512),
+                  nn.LeakyReLU(0.2, inplace=True)]
+
 
         # FCN classification layer
         model += [nn.Conv2d(512, 1, 4, padding=1)]
@@ -92,9 +102,8 @@ class Discriminator(nn.Module):
 
     def forward(self, x):
         x = self.model(x)
-        # Average pooling and flatten
+        #  import ipdb; ipdb.set_trace()
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
-        return x
 
 
 class UNet(nn.Module):
@@ -142,11 +151,9 @@ class DoubleConv(nn.Module):
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
-            #  nn.BatchNorm2d(mid_channels),
             nn.InstanceNorm2d(mid_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
-            #  nn.BatchNorm2d(out_channels),
             nn.InstanceNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
@@ -207,3 +214,7 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 
+if __name__ == "__main__":
+    net = Discriminator(1)
+    x = torch.randn(5,1,256,256)
+    net(x)
