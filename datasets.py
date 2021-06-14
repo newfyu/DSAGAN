@@ -11,19 +11,24 @@ from torch.utils.data import Dataset
 
 # tv
 class ImageDataset(Dataset):
-    def __init__(self, root, size=256, unaligned=False, mode='train'):
+    def __init__(self, root, size=256, unaligned=False, mode='train',transform=None):
         if mode == 'train':
             self.transform = T.Compose([
                 T.RandomResizedCrop(size, scale=(0.6, 1.4), interpolation=Image.BICUBIC),
                 T.RandomHorizontalFlip(p=0.2),
                 T.ColorJitter(0.2, 0.2),
                 T.ToTensor(),
-                T.Normalize((0.5,), (0.5,))])
+                T.Normalize((0.5,), (0.5,))
+            ])
         else:
             self.transform = T.Compose([
                 T.Resize(size),
                 T.ToTensor(),
-                T.Normalize((0.5,), (0.5,))])
+                T.Normalize((0.5,), (0.5,))
+            ])
+        if transform:
+            self.transform = transform
+
         self.unaligned = unaligned
 
         self.files_A = sorted(glob.glob(os.path.join(root, '%s/A' % mode) + '/*.*'))

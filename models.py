@@ -56,7 +56,8 @@ class Generator(nn.Module):
         # Output layer
         model += [nn.ReflectionPad2d(3),
                   nn.Conv2d(64, output_nc, 7),
-                  nn.Tanh()]
+                  #  nn.Tanh()
+                 ]
 
         self.model = nn.Sequential(*model)
 
@@ -81,18 +82,18 @@ class Discriminator(nn.Module):
                   nn.InstanceNorm2d(256),
                   nn.LeakyReLU(0.2, inplace=True)]
 
-        model += [nn.Conv2d(256, 512, 4, stride=2, padding=1), #注意原版这儿stride=1
+        model += [nn.Conv2d(256, 512, 4, stride=1, padding=1), #注意原版这儿stride=1
                   nn.InstanceNorm2d(512),
                   nn.LeakyReLU(0.2, inplace=True)]
 
         # 额外添加层
-        model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
-                  nn.InstanceNorm2d(512),
-                  nn.LeakyReLU(0.2, inplace=True)]
+        #  model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
+                  #  nn.InstanceNorm2d(512),
+                  #  nn.LeakyReLU(0.2, inplace=True)]
 
-        model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
-                  nn.InstanceNorm2d(512),
-                  nn.LeakyReLU(0.2, inplace=True)]
+        #  model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
+                  #  nn.InstanceNorm2d(512),
+                  #  nn.LeakyReLU(0.2, inplace=True)]
 
 
         # FCN classification layer
