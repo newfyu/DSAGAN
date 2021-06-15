@@ -100,9 +100,11 @@ class Discriminator(nn.Module):
         model += [nn.Conv2d(512, 1, 4, padding=1)]
 
         self.model = nn.Sequential(*model)
+        self.dropout = nn.Dropout2d(p=0.2)
 
     def forward(self, x):
         x = self.model(x)
+        #  x = self.dropout(x)
         #  import ipdb; ipdb.set_trace()
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
 

@@ -32,6 +32,10 @@ parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads 
 parser.add_argument('--nd', type=int, default=1, help='train the discriminator every nd steps')
 parser.add_argument('--ng', type=int, default=1, help='train the generator every ng steps')
 parser.add_argument('--dim', type=int, default=64, help='network base dim')
+parser.add_argument('--w_idt', type=int, default=5, help='idt loss weight')
+parser.add_argument('--w_cycle', type=int, default=10, help='cycle loss weight')
+parser.add_argument('--w_a2b', type=int, default=1, help='GAN generator_A2B loss weight')
+parser.add_argument('--w_b2a', type=int, default=1, help='GAN generator_B2A loss weight')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
 parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
 parser.add_argument('--ema_step', type=int, default=10, help='ema update step')
@@ -150,26 +154,26 @@ for epoch in range(opt.epoch, opt.n_epochs):
         # Identity loss
         #  G_A2B(B) should equal B if real B is fed
         same_B = netG_A2B(real_B)
-        loss_identity_B = criterion_identity(same_B, real_B) * 5.0
+        loss_identity_B = criterion_identity(same_B, real_B) * opt.w_idt
         # G_B2A(A) should equal A if real A is fed
         same_A = netG_B2A(real_A)
-        loss_identity_A = criterion_identity(same_A, real_A) * 5.0
+        loss_identity_A = criterion_identity(same_A, real_A) * opt.w_idt
 
         # GAN loss
         fake_B = netG_A2B(real_A)
         pred_fake = netD_B(fake_B)
-        loss_GAN_A2B = criterion_GAN(pred_fake, target_real)
+        loss_GAN_A2B = criterion_GAN(pred_fake, target_real) * opt.w_a2b
 
         fake_A = netG_B2A(real_B)
         pred_fake = netD_A(fake_A)
-        loss_GAN_B2A = criterion_GAN(pred_fake, target_real)
+        loss_GAN_B2A = criterion_GAN(pred_fake, target_real) * opt.w_b2a
 
         # Cycle loss
         recovered_A = netG_B2A(fake_B)
-        loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * 10.0
+        loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * opt.w_cycle
 
         recovered_B = netG_A2B(fake_A)
-        loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * 10.0
+        loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * opt.w_cycle
 
         # Total loss
         loss_G = loss_identity_A + loss_identity_B + loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
