@@ -31,11 +31,12 @@ parser.add_argument('--output_nc', type=int, default=1, help='number of channels
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
 parser.add_argument('--nd', type=int, default=1, help='train the discriminator every nd steps')
 parser.add_argument('--ng', type=int, default=1, help='train the generator every ng steps')
-parser.add_argument('--dim', type=int, default=64, help='network base dim')
+parser.add_argument('--dim', type=int, default=32, help='network base dim')
 parser.add_argument('--w_idt', type=int, default=5, help='idt loss weight')
 parser.add_argument('--w_cycle', type=int, default=10, help='cycle loss weight')
 parser.add_argument('--w_a2b', type=int, default=1, help='GAN generator_A2B loss weight')
 parser.add_argument('--w_b2a', type=int, default=1, help='GAN generator_B2A loss weight')
+parser.add_argument('--replay_prob', type=float, default=0.5, help='')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
 parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
 parser.add_argument('--ema_step', type=int, default=10, help='ema update step')
@@ -123,8 +124,8 @@ input_B = torch.FloatTensor(opt.batch_size, opt.output_nc, opt.size, opt.size).t
 target_real = Variable(torch.FloatTensor(opt.batch_size, 1).fill_(1.0), requires_grad=False).to(device)
 target_fake = Variable(torch.FloatTensor(opt.batch_size, 1).fill_(0.0), requires_grad=False).to(device)
 
-fake_A_buffer = ReplayBuffer()
-fake_B_buffer = ReplayBuffer()
+fake_A_buffer = ReplayBuffer(p=opt.replay_prob)
+fake_B_buffer = ReplayBuffer(p=opt.replay_prob)
 
 # Dataset loader
 dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size,mode='train'),

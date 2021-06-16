@@ -32,10 +32,11 @@ class logger():
 
 
 class ReplayBuffer():
-    def __init__(self, max_size=50):
+    def __init__(self, max_size=50, p=0.5):
         assert (max_size > 0), 'Empty buffer or trying to create a black hole. Be careful.'
         self.max_size = max_size
         self.data = []
+        self.p = p
 
     def push_and_pop(self, data):
         to_return = []
@@ -45,7 +46,7 @@ class ReplayBuffer():
                 self.data.append(element)
                 to_return.append(element)
             else:
-                if random.uniform(0,1) > 0.5:
+                if random.uniform(0,1) > self.p:
                     i = random.randint(0, self.max_size-1)
                     to_return.append(self.data[i].clone())
                     self.data[i] = element
