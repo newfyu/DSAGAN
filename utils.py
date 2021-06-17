@@ -1,19 +1,28 @@
-import random
-import time
 import datetime
-import sys
-
-from torch.autograd import Variable
-import torch
-import numpy as np
-import mlflow
+import random
 import shutil
+import sys
+import time
+
+import cv2
+import mlflow
+import numpy as np
+import pylibjpeg
+import torch
+import torchvision
+import torchvision.transforms as T
+from PIL import Image, ImageOps
+from pydicom import dcmread
+from torch.autograd import Variable
+from tqdm import tqdm
+
 
 def tensor2image(tensor):
-    image = 127.5*(tensor[0].cpu().float().numpy() + 1.0)
+    image = 127.5 * (tensor[0].cpu().float().numpy() + 1.0)
     if image.shape[0] == 1:
-        image = np.tile(image, (3,1,1))
+        image = np.tile(image, (3, 1, 1))
     return image.astype(np.uint8)
+
 
 class logger():
     def __init__(self, exp_name, run_name):
@@ -23,12 +32,11 @@ class logger():
         experiment_id = run.info.experiment_id
         run_dir = f'mlruns/{experiment_id}/{run_id}'
         art_dir = f"{run_dir}/artifacts"
-        ckpt_path = f"{run_dir}/last.ckpt" 
+        ckpt_path = f"{run_dir}/last.ckpt"
         mlflow.log_params(vars(opt))
         source_code = [i for i in os.listdir() if ".py" in i]
         for i in source_code:
             shutil.copy(i, f"{art_dir}/{i}")
-        
 
 
 class ReplayBuffer():
@@ -46,13 +54,14 @@ class ReplayBuffer():
                 self.data.append(element)
                 to_return.append(element)
             else:
-                if random.uniform(0,1) > self.p:
-                    i = random.randint(0, self.max_size-1)
+                if random.uniform(0, 1) > self.p:
+                    i = random.randint(0, self.max_size - 1)
                     to_return.append(self.data[i].clone())
                     self.data[i] = element
                 else:
                     to_return.append(element)
         return Variable(torch.cat(to_return))
+
 
 class LambdaLR():
     def __init__(self, n_epochs, offset, decay_start_epoch):
@@ -62,7 +71,8 @@ class LambdaLR():
         self.decay_start_epoch = decay_start_epoch
 
     def step(self, epoch):
-        return 1.0 - max(0, epoch + self.offset - self.decay_start_epoch)/(self.n_epochs - self.decay_start_epoch)
+        return 1.0 - max(0, epoch + self.offset - self.decay_start_epoch) / (self.n_epochs - self.decay_start_epoch)
+
 
 def weights_init_normal(m):
     classname = m.__class__.__name__
@@ -72,15 +82,16 @@ def weights_init_normal(m):
         torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
         torch.nn.init.constant(m.bias.data, 0.0)
 
+
 class EMA():
     def __init__(self, beta):
         super().__init__()
         self.beta = beta
-        self.started= False
+        self.started = False
 
     def update_average(self, old, new):
         if not self.started:
-            self.started= True
+            self.started = True
             return new
         return old * self.beta + (1 - self.beta) * new
 
@@ -88,3 +99,83 @@ class EMA():
         for current_params, ma_params in zip(current_model.parameters(), ma_model.parameters()):
             old_weight, up_weight = ma_params.data, current_params.data
             ma_params.data = self.update_average(old_weight, up_weight)
+
+
+def multiangle_fusion(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True):
+    """输入张量x和模型model，融合多个角度和多个ckpt后得到输出out：
+    ckpt：checkpoint path
+    x：input tensor, shape(C,H,W)
+    pad：边缘填充
+    return_x: 是否返回转换成图片的x
+    """
+    outs = []
+    B0 = x.to(device)
+    B1 = T.functional.rotate(B0, 90)
+    B2 = T.functional.rotate(B0, 180)
+    B3 = T.functional.rotate(B0, 270)
+    B = torch.stack((B0, B1, B2, B3))
+    if return_x:
+        B_dnorm = torchvision.utils.make_grid(B0, normalize=True, padding=0)
+        B_dnorm = T.ToPILImage()(B_dnorm)
+        B_dnorm = T.CenterCrop(size)(B_dnorm)
+
+    B = T.functional.pad(B, pad, padding_mode='reflect')
+    for ckpt in ckpts:
+        checkpoint = torch.load(ckpt, map_location=device)
+        model.load_state_dict(checkpoint['netE'])
+        model.to(device)
+        model.eval()
+        with torch.no_grad():
+            fakeA = model.model(B)
+        fakeA = T.CenterCrop(size)(fakeA)
+        fakeA[1] = T.functional.rotate(fakeA[1], 270)
+        fakeA[2] = T.functional.rotate(fakeA[2], 180)
+        fakeA[3] = T.functional.rotate(fakeA[3], 90)
+        outs.append(fakeA)
+
+    out = torch.cat(outs)
+    out = out.max(0, True)[0]
+    out = torchvision.utils.make_grid(out, normalize=True)
+
+    out = (out.permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
+    out = cv2.fastNlMeansDenoising(out, None, 5, 7, 21)
+
+    out = T.ToPILImage()(out)
+    out = ImageOps.autocontrast(out, cutoff=1)
+
+    if return_x:
+        return B_dnorm, out
+    else:
+        return out
+
+
+def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu'):
+    """读取dicom，提取血管后转换为gif图片
+    scr: dicom地址
+    dst: 输出gif地址
+    model: 输入模型nn
+    ckpts: 模型的checkpoint，list，可以多个
+    pad：边缘填充
+    device: 设备号，比如'cpu','cuda:0'
+    输出: gif
+    """
+    arr = dcmread(src).pixel_array
+    tsr = torch.from_numpy(arr) / 255
+    tfmc = T.Compose([
+        T.Resize(256),
+        T.Normalize((0.5,), (0.5,))
+    ])
+    tsr = tfmc(tsr)
+    imgs = []
+    for i in tqdm(range(tsr.shape[0])):
+        B = tsr[i].unsqueeze(0)
+        B_dnorm, fakeA = multiangle_fusion(model, ckpts, B, pad=pad, device=device)
+        B_dnorm = T.ToTensor()(B_dnorm)
+        fakeA = T.ToTensor()(fakeA)
+
+        grid = torch.stack((B_dnorm, fakeA), dim=0)
+        grid = torchvision.utils.make_grid(grid)
+        img = T.ToPILImage()(grid)
+
+        imgs.append(img)
+    img.save(dst, save_all=True, append_images=imgs)
