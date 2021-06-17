@@ -70,7 +70,6 @@ class Discriminator(nn.Module):
     def __init__(self, input_nc):
         super(Discriminator, self).__init__()
 
-        # A bunch of convolutions one after another
         model = [nn.Conv2d(input_nc, 64, 4, stride=2, padding=1),
                  nn.LeakyReLU(0.2, inplace=True)]
 
@@ -82,7 +81,7 @@ class Discriminator(nn.Module):
                   nn.InstanceNorm2d(256),
                   nn.LeakyReLU(0.2, inplace=True)]
 
-        model += [nn.Conv2d(256, 512, 4, stride=1, padding=1), #注意原版这儿stride=1
+        model += [nn.Conv2d(256, 512, 4, stride=1, padding=1),
                   nn.InstanceNorm2d(512),
                   nn.LeakyReLU(0.2, inplace=True)]
 
@@ -201,9 +200,6 @@ class Up(nn.Module):
 
         x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
                         diffY // 2, diffY - diffY // 2])
-        # if you have padding issues, see
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
         x = torch.cat([x2, x1], dim=1)
         return self.conv(x)
 

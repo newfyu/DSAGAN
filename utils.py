@@ -101,36 +101,46 @@ class EMA():
             ma_params.data = self.update_average(old_weight, up_weight)
 
 
-def multiangle_fusion(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True):
-    """输入张量x和模型model，融合多个角度和多个ckpt后得到输出out：
+def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=5):
+    """融合多个角度或多个ckpt的输出,可取得更好的结果
     ckpt：checkpoint path
     x：input tensor, shape(C,H,W)
-    pad：边缘填充
+    pad：边缘填充, 如果mutiangle=False, 仅填充right和bottom，如果multiangel=True, 填充四边。
+         pad可增加边缘血管的提取，但也可能增加噪声
     return_x: 是否返回转换成图片的x
+    multiangle: 是否多角度预测
+    denoise: 去噪强度
     """
     outs = []
     B0 = x.to(device)
-    B1 = T.functional.rotate(B0, 90)
-    B2 = T.functional.rotate(B0, 180)
-    B3 = T.functional.rotate(B0, 270)
-    B = torch.stack((B0, B1, B2, B3))
+    if multiangle:
+        B1 = T.functional.rotate(B0, 90)
+        B2 = T.functional.rotate(B0, 180)
+        B3 = T.functional.rotate(B0, 270)
+        B = torch.stack((B0, B1, B2, B3))
+        B = T.functional.pad(B, pad, padding_mode='reflect')  # 仅pad了底边
+    else:
+        B = B0.unsqueeze(0)
+        B = T.functional.pad(B, (0, 0, pad, pad), padding_mode='reflect')  # 仅pad了底边
     if return_x:
         B_dnorm = torchvision.utils.make_grid(B0, normalize=True, padding=0)
         B_dnorm = T.ToPILImage()(B_dnorm)
         B_dnorm = T.CenterCrop(size)(B_dnorm)
 
-    B = T.functional.pad(B, pad, padding_mode='reflect')
     for ckpt in ckpts:
         checkpoint = torch.load(ckpt, map_location=device)
         model.load_state_dict(checkpoint['netE'])
         model.to(device)
-        model.eval()
         with torch.no_grad():
             fakeA = model.model(B)
-        fakeA = T.CenterCrop(size)(fakeA)
-        fakeA[1] = T.functional.rotate(fakeA[1], 270)
-        fakeA[2] = T.functional.rotate(fakeA[2], 180)
-        fakeA[3] = T.functional.rotate(fakeA[3], 90)
+        if multiangle:
+            fakeA[1] = T.functional.rotate(fakeA[1], 270)
+            fakeA[2] = T.functional.rotate(fakeA[2], 180)
+            fakeA[3] = T.functional.rotate(fakeA[3], 90)
+            fakeA = T.CenterCrop(size)(fakeA)
+        else:
+            fakeA = fakeA[:, :, :size, :size]
+
         outs.append(fakeA)
 
     out = torch.cat(outs)
@@ -138,7 +148,7 @@ def multiangle_fusion(model, ckpts, x, size=256, pad=0, device='cpu', return_x=T
     out = torchvision.utils.make_grid(out, normalize=True)
 
     out = (out.permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
-    out = cv2.fastNlMeansDenoising(out, None, 5, 7, 21)
+    out = cv2.fastNlMeansDenoising(out, None, denoise, 7, 21)
 
     out = T.ToPILImage()(out)
     out = ImageOps.autocontrast(out, cutoff=1)
@@ -149,13 +159,13 @@ def multiangle_fusion(model, ckpts, x, size=256, pad=0, device='cpu', return_x=T
         return out
 
 
-def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu'):
+def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5):
     """读取dicom，提取血管后转换为gif图片
     scr: dicom地址
     dst: 输出gif地址
     model: 输入模型nn
     ckpts: 模型的checkpoint，list，可以多个
-    pad：边缘填充
+    pad：边缘填充, 如果mutiangle=False, 仅填充right和bottom，如果multiangel=True, 填充四边
     device: 设备号，比如'cpu','cuda:0'
     输出: gif
     """
@@ -169,7 +179,7 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu'):
     imgs = []
     for i in tqdm(range(tsr.shape[0])):
         B = tsr[i].unsqueeze(0)
-        B_dnorm, fakeA = multiangle_fusion(model, ckpts, B, pad=pad, device=device)
+        B_dnorm, fakeA = fusion_predict(model, ckpts, B, pad=pad, device=device, multiangle=multiangle, denoise=denoise)
         B_dnorm = T.ToTensor()(B_dnorm)
         fakeA = T.ToTensor()(fakeA)
 

@@ -3,8 +3,6 @@ import os
 import random
 import numpy as np
 
-import albumentations as A
-from albumentations.pytorch import ToTensor
 import torchvision.transforms as T
 from PIL import Image
 from torch.utils.data import Dataset
