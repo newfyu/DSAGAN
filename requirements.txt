@@ -1,4 +1,7 @@
+opencv_python_headless
+pydicom
 tqdm
-mlflow
-torch
+pylibjpeg
 torchvision
+torch
+mlflow

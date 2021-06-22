@@ -99,12 +99,13 @@ class Discriminator(nn.Module):
         model += [nn.Conv2d(512, 1, 4, padding=1)]
 
         self.model = nn.Sequential(*model)
-        self.dropout = nn.Dropout2d(p=0.2)
+        #  edge_wt = nn.functional.pad(torch.ones(1,26,26,requires_grad=False),(2,2,2,2),value=2) # 边缘加权矩阵
+        #  self.register_buffer('edge_wt', edge_wt)
 
     def forward(self, x):
         x = self.model(x)
-        #  x = self.dropout(x)
         #  import ipdb; ipdb.set_trace()
+        #  x = x * self.edge_wt
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
 
 

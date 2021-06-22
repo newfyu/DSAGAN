@@ -24,6 +24,16 @@ def tensor2image(tensor):
     return image.astype(np.uint8)
 
 
+def tophat(img, fsize=20):
+    img = np.array(img).astype(np.float32)
+    filterSize = (fsize, fsize)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, filterSize)
+    wth = cv2.morphologyEx(img, cv2.MORPH_TOPHAT, kernel).astype(np.float32)
+    bth = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel).astype(np.float32)
+    dst = (img + wth - bth).clip(0, 255).astype(np.uint8)
+    return T.ToPILImage()(dst)
+
+
 class logger():
     def __init__(self, exp_name, run_name):
         mlflow.set_experiment(opt.exp_name)
@@ -101,7 +111,7 @@ class EMA():
             ma_params.data = self.update_average(old_weight, up_weight)
 
 
-def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=5):
+def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=3, cutoff=1):
     """融合多个角度或多个ckpt的输出,可取得更好的结果
     ckpt：checkpoint path
     x：input tensor, shape(C,H,W)
@@ -151,7 +161,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
     out = cv2.fastNlMeansDenoising(out, None, denoise, 7, 21)
 
     out = T.ToPILImage()(out)
-    out = ImageOps.autocontrast(out, cutoff=1)
+    out = ImageOps.autocontrast(out, cutoff=cutoff)
 
     if return_x:
         return B_dnorm, out
@@ -159,7 +169,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         return out
 
 
-def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5):
+def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5, cutoff=1):
     """读取dicom，提取血管后转换为gif图片
     scr: dicom地址
     dst: 输出gif地址
@@ -179,7 +189,7 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
     imgs = []
     for i in tqdm(range(tsr.shape[0])):
         B = tsr[i].unsqueeze(0)
-        B_dnorm, fakeA = fusion_predict(model, ckpts, B, pad=pad, device=device, multiangle=multiangle, denoise=denoise)
+        B_dnorm, fakeA = fusion_predict(model, ckpts, B, pad=pad, device=device, multiangle=multiangle, denoise=denoise, cutoff=cutoff)
         B_dnorm = T.ToTensor()(B_dnorm)
         fakeA = T.ToTensor()(fakeA)
 

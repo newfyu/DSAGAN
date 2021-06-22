@@ -8,10 +8,10 @@ import mlflow
 import torch
 import torchvision
 import torchvision.transforms as transforms
-from torchvision.utils import make_grid,save_image
 from PIL import Image
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
+from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
 from datasets import ImageDataset
@@ -21,10 +21,10 @@ from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
 parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs of training')
+parser.add_argument('--decay_epoch', type=int, default=30, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v4/', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--decay_epoch', type=int, default=30, help='epoch to start linearly decaying the learning rate to 0')
 parser.add_argument('--size', type=int, default=256, help='size of the data crop (squared assumed)')
 parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
 parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
@@ -36,15 +36,16 @@ parser.add_argument('--w_idt', type=int, default=5, help='idt loss weight')
 parser.add_argument('--w_cycle', type=int, default=10, help='cycle loss weight')
 parser.add_argument('--w_a2b', type=int, default=1, help='GAN generator_A2B loss weight')
 parser.add_argument('--w_b2a', type=int, default=1, help='GAN generator_B2A loss weight')
-parser.add_argument('--replay_prob', type=float, default=0.5, help='')
+parser.add_argument('--replay_prob', type=float, default=1, help='replay prob')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
 parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
 parser.add_argument('--ema_step', type=int, default=10, help='ema update step')
 parser.add_argument('--ema_begin_step', type=int, default=10000, help='ema start step')
-parser.add_argument('--sleep', type=float, default=0., help='slow down train')
-parser.add_argument('--exp_name', type=str, help='trial name', default='Default')
-parser.add_argument('--name', type=str, help='trial name', required=True)
+parser.add_argument('--sleep', type=float, default=0., help='slow down train, if you gpu overheat')
+parser.add_argument('--exp_name', type=str, help='mlflow experiment name', default='Default')
+parser.add_argument('--name', type=str, help='mlflow trial name', required=True)
 parser.add_argument('--resume', type=str, default=None, help='resume from checkpoint')
+parser.add_argument('--nobi', action='store_false', help='unet bilinear mode')
 
 opt = parser.parse_args()
 print(opt)
@@ -54,14 +55,14 @@ device = torch.device(opt.device)
 # Networks
 #  netG_A2B = Generator(opt.input_nc, opt.output_nc)
 #  netG_B2A = Generator(opt.output_nc, opt.input_nc)
-netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim)
-netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim)
+netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi)
+netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi)
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
 # EMA model
 ema_updater = EMA(0.995)
-netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim)
+netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi)
 #  netE = Generator(opt.output_nc, opt.input_nc)
 
 if opt.device != 'cpu':
@@ -128,10 +129,10 @@ fake_A_buffer = ReplayBuffer(p=opt.replay_prob)
 fake_B_buffer = ReplayBuffer(p=opt.replay_prob)
 
 # Dataset loader
-dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True,size=opt.size,mode='train'),
+dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True, size=opt.size, mode='train'),
                         batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu, drop_last=True)
 
-simple_dl = DataLoader(ImageDataset(opt.dataroot, unaligned=False,size=opt.size,mode='test'),
+simple_dl = DataLoader(ImageDataset(opt.dataroot, unaligned=False, size=opt.size, mode='test'),
                        batch_size=8, shuffle=False, num_workers=opt.n_cpu)
 fix_sample = next(iter(simple_dl))
 fix_A = fix_sample['A'].to(device)
@@ -233,8 +234,6 @@ for epoch in range(opt.epoch, opt.n_epochs):
             mlflow.log_metrics({'loss_G': loss_G.item(), 'loss_G_identity': (loss_identity_A + loss_identity_B).item(), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A).item(), 'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB).item(), 'loss_D': (loss_D_A + loss_D_B).item()}, step=step)
         time.sleep(opt.sleep)
 
-
-
     # Update learning rates
     lr_scheduler_G.step()
     lr_scheduler_D_A.step()
@@ -246,19 +245,19 @@ for epoch in range(opt.epoch, opt.n_epochs):
         out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
         out2 = (out > 0.01).float()
-        # gen ema image
+        # Gen ema image
         out_ema = netE.model(fix_B)
         fake_E = out_ema + fix_B
         out_ema2 = (out_ema > 0.01).float()
-        
+
         B_norm = make_grid(fix_B, normalize=True, padding=0)
         fake_A = make_grid(fake_A, normalize=True, padding=0)
         out = make_grid(out, normalize=True, padding=0)
         out2 = make_grid(out2, normalize=True, padding=0)
         out_ema = make_grid(out_ema, normalize=True, padding=0)
         out_ema2 = make_grid(out_ema2, normalize=True, padding=0)
-        
-        imgs = make_grid([B_norm,fake_A,out,out2,out_ema,out_ema2], normalize=True, nrow=1)
+
+        imgs = make_grid([B_norm, fake_A, out, out2, out_ema, out_ema2], normalize=True, nrow=1)
         save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
         netG_B2A.train()
 

@@ -7,6 +7,7 @@ import torchvision.transforms as T
 from PIL import Image
 from torch.utils.data import Dataset
 import random
+from utils import tophat
 
 
 def random_rotate(img, p=1, angles=[0, 90, 180, 270]):
@@ -29,7 +30,8 @@ class ImageDataset(Dataset):
     def __init__(self, root, size=256, unaligned=False, mode='train', transform=None):
         if mode == 'train':
             self.transform = T.Compose([
-                T.RandomResizedCrop(size, scale=(0.7, 1), interpolation=Image.BICUBIC),
+                T.Lambda(lambda img: tophat(img,50)),
+                T.RandomResizedCrop(size, scale=(0.6, 1), interpolation=Image.BICUBIC),
                 T.RandomHorizontalFlip(p=0.5),
                 T.Lambda(lambda x:random_rotate(x, p=1)),
                 T.ColorJitter(0.2, 0.2),
