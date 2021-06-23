@@ -15,7 +15,7 @@ from PIL import Image, ImageOps
 from pydicom import dcmread
 from torch.autograd import Variable
 from tqdm import tqdm
-from skimage.filters import hessian,meijering
+from skimage.filters import hessian, meijering
 
 
 def tensor2image(tensor):
@@ -25,41 +25,19 @@ def tensor2image(tensor):
     return image.astype(np.uint8)
 
 
-def tophat(img, fsize=20):
-    img = np.array(img).astype(np.float32)
-    filterSize = (fsize, fsize)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, filterSize)
-    wth = cv2.morphologyEx(img, cv2.MORPH_TOPHAT, kernel).astype(np.float32)
-    bth = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel).astype(np.float32)
-    dst = (img + wth - bth).clip(0, 255).astype(np.uint8)
-    return T.ToPILImage()(dst)
-
-def hessian_enhance(img, sigma=[0.1]):
-    img = np.array(img)
-    dst = hessian(img, sigmas=sigma, black_ridges=True)
-    dst = (dst*255).astype('uint8')
-    return T.ToPILImage()(dst)
-
-def meijering_enhance(img, sigma=[0.1]):
-    img = np.array(img)
-    dst = meijering(img, sigmas=sigma, black_ridges=True)
-    dst = (dst*255).astype('uint8')
-    return T.ToPILImage()(dst)
-
-
-class logger():
-    def __init__(self, exp_name, run_name):
-        mlflow.set_experiment(opt.exp_name)
-        run = mlflow.start_run(run_name=opt.name)
-        run_id = run.info.run_id
-        experiment_id = run.info.experiment_id
-        run_dir = f'mlruns/{experiment_id}/{run_id}'
-        art_dir = f"{run_dir}/artifacts"
-        ckpt_path = f"{run_dir}/last.ckpt"
-        mlflow.log_params(vars(opt))
-        source_code = [i for i in os.listdir() if ".py" in i]
-        for i in source_code:
-            shutil.copy(i, f"{art_dir}/{i}")
+#  class logger():
+    #  def __init__(self, exp_name, run_name):
+        #  mlflow.set_experiment(exp_name)
+        #  run = mlflow.start_run(run_name=run_name)
+        #  run_id = run.info.run_id
+        #  experiment_id = run.info.experiment_id
+        #  run_dir = f'mlruns/{experiment_id}/{run_id}'
+        #  art_dir = f"{run_dir}/artifacts"
+        #  ckpt_path = f"{run_dir}/last.ckpt"
+        #  mlflow.log_params(vars(opt))
+        #  source_code = [i for i in os.listdir() if ".py" in i]
+        #  for i in source_code:
+            #  shutil.copy(i, f"{art_dir}/{i}")
 
 
 class ReplayBuffer():
