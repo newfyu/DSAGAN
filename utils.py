@@ -15,6 +15,7 @@ from PIL import Image, ImageOps
 from pydicom import dcmread
 from torch.autograd import Variable
 from tqdm import tqdm
+from skimage.filters import hessian,meijering
 
 
 def tensor2image(tensor):
@@ -31,6 +32,18 @@ def tophat(img, fsize=20):
     wth = cv2.morphologyEx(img, cv2.MORPH_TOPHAT, kernel).astype(np.float32)
     bth = cv2.morphologyEx(img, cv2.MORPH_BLACKHAT, kernel).astype(np.float32)
     dst = (img + wth - bth).clip(0, 255).astype(np.uint8)
+    return T.ToPILImage()(dst)
+
+def hessian_enhance(img, sigma=[0.1]):
+    img = np.array(img)
+    dst = hessian(img, sigmas=sigma, black_ridges=True)
+    dst = (dst*255).astype('uint8')
+    return T.ToPILImage()(dst)
+
+def meijering_enhance(img, sigma=[0.1]):
+    img = np.array(img)
+    dst = meijering(img, sigmas=sigma, black_ridges=True)
+    dst = (dst*255).astype('uint8')
     return T.ToPILImage()(dst)
 
 

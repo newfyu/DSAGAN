@@ -7,7 +7,7 @@ import torchvision.transforms as T
 from PIL import Image
 from torch.utils.data import Dataset
 import random
-from utils import tophat
+from utils import tophat, hessian_enhance, meijering_enhance
 
 
 def random_rotate(img, p=1, angles=[0, 90, 180, 270]):
@@ -30,17 +30,21 @@ class ImageDataset(Dataset):
     def __init__(self, root, size=256, unaligned=False, mode='train', transform=None):
         if mode == 'train':
             self.transform = T.Compose([
-                T.Lambda(lambda img: tophat(img,50)),
+                #  T.Lambda(lambda img: tophat(img,50)), # TopHat增强
+                #  T.Lambda(lambda img: hessian_enhance(img)), # Hessian增强
+                T.Lambda(lambda img: meijering_enhance(img)), # meijering增强
                 T.RandomResizedCrop(size, scale=(0.6, 1), interpolation=Image.BICUBIC),
                 T.RandomHorizontalFlip(p=0.5),
                 T.Lambda(lambda x:random_rotate(x, p=1)),
-                T.ColorJitter(0.2, 0.2),
-                T.Lambda(lambda x:random_gamma(x, (0.2, 2), p=1)),
+                #  T.ColorJitter(0.2, 0.2),
+                #  T.Lambda(lambda x:random_gamma(x, (0.2, 2), p=1)),
                 T.ToTensor(),
                 T.Normalize((0.5,), (0.5,))
             ])
         else:
             self.transform = T.Compose([
+                #  T.Lambda(lambda img: hessian_enhance(img)), # Hessian增强
+                T.Lambda(lambda img: meijering_enhance(img)), # meijering增强
                 T.Resize(size),
                 T.ToTensor(),
                 T.Normalize((0.5,), (0.5,))

@@ -20,9 +20,9 @@ from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=50, help='number of epochs of training')
+parser.add_argument('--n_epochs', type=int, default=60, help='number of epochs of training')
 parser.add_argument('--decay_epoch', type=int, default=30, help='epoch to start linearly decaying the learning rate to 0')
-parser.add_argument('--batch_size', type=int, default=1, help='size of the batches')
+parser.add_argument('--batch_size', type=int, default=4, help='size of the batches')
 parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v4/', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
 parser.add_argument('--size', type=int, default=256, help='size of the data crop (squared assumed)')
@@ -274,8 +274,10 @@ for epoch in range(opt.epoch, opt.n_epochs):
     torch.save(states, ckpt_path)
 
     # Save every epoch for B2A
-    states = {'netG_B2A': netG_B2A.state_dict(),
-              'netE': netE.state_dict()}
+    states = {
+              #  'netG_B2A': netG_B2A.state_dict(),
+              'netE': netE.state_dict()
+    }
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 
 mlflow.end_run()
