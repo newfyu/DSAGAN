@@ -42,13 +42,14 @@ class ImageDataset(Dataset):
                 T.RandomResizedCrop(size, scale=(0.6, 1), interpolation=Image.BICUBIC),
                 T.RandomHorizontalFlip(p=0.5),
                 T.Lambda(lambda x:random_rotate(x, p=1)),
-                #  T.ColorJitter(0.2, 0.2),
-                #  T.Lambda(lambda x:random_gamma(x, (0.2, 2), p=1)),
+                T.ColorJitter(0.3, 0.3),
+                T.Lambda(lambda x:random_gamma(x, (0.2, 2), p=1)),
                 T.ToTensor(),
                 T.Normalize((0.5,), (0.5,))
             ])
         else:
             self.transform = T.Compose([
+                T.Lambda(lambda img: tophat(img,50)), # TopHat增强
                 T.Resize(size),
                 T.ToTensor(),
                 T.Normalize((0.5,), (0.5,))

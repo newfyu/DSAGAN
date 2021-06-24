@@ -15,7 +15,6 @@ from PIL import Image, ImageOps
 from pydicom import dcmread
 from torch.autograd import Variable
 from tqdm import tqdm
-from skimage.filters import hessian, meijering
 
 
 def tensor2image(tensor):
