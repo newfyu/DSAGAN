@@ -15,6 +15,7 @@ from PIL import Image, ImageOps
 from pydicom import dcmread
 from torch.autograd import Variable
 from tqdm import tqdm
+from skimage import filters,morphology
 
 
 def tensor2image(tensor):
@@ -189,3 +190,40 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
 
         imgs.append(img)
     img.save(dst, save_all=True, append_images=imgs)
+
+def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, remove_size=500, return_skel=False):
+    """
+    local_kernel: thresh_local's filter size
+    local_offset: thresh of local's offset value
+    yan_offset: thresh of yan's offset value
+    close_iter: image close operate's iter number
+    remove_size: remove_small_objects's max size
+    """
+    image = np.array(img.convert('L'))
+    thresh = filters.threshold_yen(image) # bad
+    seg1 =(image >= (thresh - yan_offset))
+    seg1 = morphology.remove_small_objects(seg1, 30)
+    seg1 = seg1.astype('uint8')*255
+
+    thresh_local = filters.threshold_local(image,local_kernel)
+    seg2 =(image >= (thresh_local - local_offset))
+    seg2 = morphology.remove_small_objects(seg2, 30)
+    seg2 = seg2.astype('uint8')*255
+    
+    inter = ((seg2/255)*(seg1/255)*255).astype('uint8')
+    
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    dst2 = cv2.morphologyEx(inter, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
+    dst2 = morphology.remove_small_objects((dst2/255).astype('bool'), remove_size)
+    dst2 = (dst2*255).astype('uint8')
+    
+    inter = ((dst2/255)*(inter/255)*255).astype('uint8')
+    if return_skel:
+        skel = morphology.skeletonize(inter/255)
+        skel = skel.astype(np.uint8) * 255
+        dst_rgb = cv2.cvtColor(inter.astype('uint8'), cv2.COLOR_GRAY2RGB)
+        dst_rgb[:,:,0] += (skel/50).astype('uint8')
+        dst_rgb[:,:,1] += (skel/50).astype('uint8')
+        return T.ToPILImage()(inter),T.ToPILImage()(dst_rgb)
+    else:
+        return  T.ToPILImage()(inter)
