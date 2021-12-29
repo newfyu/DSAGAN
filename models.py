@@ -21,8 +21,9 @@ class ResidualBlock(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, input_nc, output_nc, n_residual_blocks=9):
+    def __init__(self, input_nc, output_nc, n_residual_blocks=9, skip_connet=True):
         super(Generator, self).__init__()
+        self.skip_connet = skip_connet
 
         # Initial convolution block
         model = [nn.ReflectionPad2d(3),
@@ -62,7 +63,10 @@ class Generator(nn.Module):
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
-        return self.model(x) + x
+        if self.skip_connet:
+            return self.model(x) + x
+        else:
+            return self.model(x)
 
 
 
@@ -110,11 +114,12 @@ class Discriminator(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, n_channels, n_classes, dim=64, bilinear=True):
+    def __init__(self, n_channels, n_classes, dim=64, bilinear=True, res=True):
         super(UNet, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
+        self.res = res
 
         self.inc = DoubleConv(n_channels, dim)
         self.down1 = Down(dim, dim * 2)
@@ -138,11 +143,14 @@ class UNet(nn.Module):
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
-        logits = self.outc(x)
-        return logits
+        res = self.outc(x)
+        return res
 
     def forward(self, x):
-        return self.model(x) + x
+        if self.res:
+            return self.model(x) + x
+        else:
+            return self.model(x)
 
 
 class DoubleConv(nn.Module):

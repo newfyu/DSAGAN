@@ -15,7 +15,8 @@ from PIL import Image, ImageOps
 from pydicom import dcmread
 from torch.autograd import Variable
 from tqdm import tqdm
-from skimage import filters,morphology
+from skimage import filters, morphology
+from datasets import tophat
 
 
 def tensor2image(tensor):
@@ -23,21 +24,6 @@ def tensor2image(tensor):
     if image.shape[0] == 1:
         image = np.tile(image, (3, 1, 1))
     return image.astype(np.uint8)
-
-
-#  class logger():
-    #  def __init__(self, exp_name, run_name):
-        #  mlflow.set_experiment(exp_name)
-        #  run = mlflow.start_run(run_name=run_name)
-        #  run_id = run.info.run_id
-        #  experiment_id = run.info.experiment_id
-        #  run_dir = f'mlruns/{experiment_id}/{run_id}'
-        #  art_dir = f"{run_dir}/artifacts"
-        #  ckpt_path = f"{run_dir}/last.ckpt"
-        #  mlflow.log_params(vars(opt))
-        #  source_code = [i for i in os.listdir() if ".py" in i]
-        #  for i in source_code:
-            #  shutil.copy(i, f"{art_dir}/{i}")
 
 
 class ReplayBuffer():
@@ -102,7 +88,7 @@ class EMA():
             ma_params.data = self.update_average(old_weight, up_weight)
 
 
-def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=3, cutoff=1):
+def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=3, cutoff=1, padding_mode='reflect'):
     """融合多个角度或多个ckpt的输出,可取得更好的结果
     ckpt：checkpoint path
     x：input tensor, shape(C,H,W)
@@ -119,18 +105,21 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         B2 = T.functional.rotate(B0, 180)
         B3 = T.functional.rotate(B0, 270)
         B = torch.stack((B0, B1, B2, B3))
-        B = T.functional.pad(B, pad, padding_mode='reflect')  # 仅pad了底边
+        B = T.functional.pad(B, pad, padding_mode=padding_mode)
     else:
         B = B0.unsqueeze(0)
-        B = T.functional.pad(B, (0, 0, pad, pad), padding_mode='reflect')  # 仅pad了底边
+        B = T.functional.pad(B, (0, 0, pad, pad), padding_mode=padding_mode)  # 仅pad了底边
     if return_x:
         B_dnorm = torchvision.utils.make_grid(B0, normalize=True, padding=0)
         B_dnorm = T.ToPILImage()(B_dnorm)
         B_dnorm = T.CenterCrop(size)(B_dnorm)
 
     for ckpt in ckpts:
-        checkpoint = torch.load(ckpt, map_location=device)
-        model.load_state_dict(checkpoint['netE'])
+        if isinstance(ckpt, dict):
+            model.load_state_dict(ckpt)
+        else:
+            checkpoint = torch.load(ckpt, map_location=device)
+            model.load_state_dict(checkpoint['netE'])
         model.to(device)
         with torch.no_grad():
             fakeA = model.model(B)
@@ -160,7 +149,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         return out
 
 
-def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5, cutoff=1):
+def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5, cutoff=1, gamma=1.5):
     """读取dicom，提取血管后转换为gif图片
     scr: dicom地址
     dst: 输出gif地址
@@ -171,17 +160,21 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
     输出: gif
     """
     arr = dcmread(src).pixel_array
-    tsr = torch.from_numpy(arr) / 255
     tfmc = T.Compose([
         T.Resize(256),
+        T.ToTensor(),
         T.Normalize((0.5,), (0.5,))
     ])
-    tsr = tfmc(tsr)
+    tfmc2 = T.Compose([T.Resize(256), T.ToTensor()])
     imgs = []
-    for i in tqdm(range(tsr.shape[0])):
-        B = tsr[i].unsqueeze(0)
+    for i in tqdm(range(arr.shape[0])):
+        B_arr = arr[i]
+        B = tophat(B_arr)
+        B = tfmc(B)
         B_dnorm, fakeA = fusion_predict(model, ckpts, B, pad=pad, device=device, multiangle=multiangle, denoise=denoise, cutoff=cutoff)
-        B_dnorm = T.ToTensor()(B_dnorm)
+        B_dnorm = tfmc2(Image.fromarray(B_arr)).repeat(3, 1, 1)
+        B_dnorm = torchvision.utils.make_grid(B_dnorm, normalize=True, padding=0)
+        fakeA = T.functional.adjust_gamma(fakeA, gamma=gamma)
         fakeA = T.ToTensor()(fakeA)
 
         grid = torch.stack((B_dnorm, fakeA), dim=0)
@@ -190,6 +183,7 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
 
         imgs.append(img)
     img.save(dst, save_all=True, append_images=imgs)
+
 
 def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, remove_size=500, return_skel=False):
     """
@@ -200,30 +194,45 @@ def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, 
     remove_size: remove_small_objects's max size
     """
     image = np.array(img.convert('L'))
-    thresh = filters.threshold_yen(image) # bad
-    seg1 =(image >= (thresh - yan_offset))
+    thresh = filters.threshold_yen(image)  # bad
+    seg1 = (image >= (thresh - yan_offset))
     seg1 = morphology.remove_small_objects(seg1, 30)
-    seg1 = seg1.astype('uint8')*255
+    seg1 = seg1.astype('uint8') * 255
 
-    thresh_local = filters.threshold_local(image,local_kernel)
-    seg2 =(image >= (thresh_local - local_offset))
+    thresh_local = filters.threshold_local(image, local_kernel)
+    seg2 = (image >= (thresh_local - local_offset))
     seg2 = morphology.remove_small_objects(seg2, 30)
-    seg2 = seg2.astype('uint8')*255
-    
-    inter = ((seg2/255)*(seg1/255)*255).astype('uint8')
-    
+    seg2 = seg2.astype('uint8') * 255
+
+    inter = ((seg2 / 255) * (seg1 / 255) * 255).astype('uint8')
+
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     dst2 = cv2.morphologyEx(inter, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
-    dst2 = morphology.remove_small_objects((dst2/255).astype('bool'), remove_size)
-    dst2 = (dst2*255).astype('uint8')
-    
-    inter = ((dst2/255)*(inter/255)*255).astype('uint8')
+    dst2 = morphology.remove_small_objects((dst2 / 255).astype('bool'), remove_size)
+    dst2 = (dst2 * 255).astype('uint8')
+
+    inter = ((dst2 / 255) * (inter / 255) * 255).astype('uint8')
     if return_skel:
-        skel = morphology.skeletonize(inter/255)
+        skel = morphology.skeletonize(inter / 255)
         skel = skel.astype(np.uint8) * 255
         dst_rgb = cv2.cvtColor(inter.astype('uint8'), cv2.COLOR_GRAY2RGB)
-        dst_rgb[:,:,0] += (skel/50).astype('uint8')
-        dst_rgb[:,:,1] += (skel/50).astype('uint8')
-        return T.ToPILImage()(inter),T.ToPILImage()(dst_rgb)
+        dst_rgb[:, :, 1] += (skel / 50).astype('uint8')
+        #  dst_rgb[:, :, 2] += (skel / 50).astype('uint8')
+        return T.ToPILImage()(inter), T.ToPILImage()(dst_rgb)
     else:
-        return  T.ToPILImage()(inter)
+        return T.ToPILImage()(inter)
+
+
+def merge_ckpts(ckpt_list):
+    """
+    融合多个ckpt
+    """
+    ckpts = ckpt_list
+    ckpt = ckpts[0].copy()
+    for key in ckpt.keys():
+        ckpt[key] = sum([c[key] for c in ckpts]) / len(ckpts)
+    return ckpt
+
+
+def denorm(x):
+    return (x - x.min()) / (x.max() - x.min() + 1e-5)
