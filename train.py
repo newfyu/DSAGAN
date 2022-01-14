@@ -10,6 +10,7 @@ import torchvision
 import torchvision.transforms as transforms
 from PIL import Image
 from torch.autograd import Variable
+from torch.nn import DataParallel
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
@@ -37,8 +38,8 @@ parser.add_argument('--w_cycle', type=int, default=10, help='cycle loss weight')
 parser.add_argument('--w_a2b', type=int, default=1, help='GAN generator_A2B loss weight')
 parser.add_argument('--w_b2a', type=int, default=1, help='GAN generator_B2A loss weight')
 parser.add_argument('--replay_prob', type=float, default=1, help='replay prob')
-parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
-parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
+parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0,mgpu use cuda')
+parser.add_argument('--log_step', type=int, default=100, help='log to mlflow every step')
 parser.add_argument('--ema_step', type=int, default=10, help='ema update step')
 parser.add_argument('--ema_begin_step', type=int, default=10000, help='ema start step')
 parser.add_argument('--sleep', type=float, default=0., help='slow down train, if you gpu overheat')
@@ -53,17 +54,17 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-#  netG_A2B = Generator(opt.input_nc, opt.output_nc)
-#  netG_B2A = Generator(opt.output_nc, opt.input_nc)
-netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi)
-netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi)
+#  netG_A2B = Generator(opt.input_nc, opt.output_nc) # G
+#  netG_B2A = Generator(opt.output_nc, opt.input_nc) # G
+netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi) # U
+netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi) # U
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
 # EMA model
 ema_updater = EMA(0.995)
-netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi)
-#  netE = Generator(opt.output_nc, opt.input_nc)
+#  netE = Generator(opt.output_nc, opt.input_nc) # G
+netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi) # U
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
@@ -71,9 +72,15 @@ if opt.device != 'cpu':
     netD_A.to(device)
     netD_B.to(device)
     netE.to(device)
+    if opt.device == 'cuda':
+        netG_A2B = DataParallel(netG_A2B.to(device))
+        netG_B2A = DataParallel(netG_B2A.to(device))
+        netD_A = DataParallel(netD_A.to(device))
+        netD_B = DataParallel(netD_B.to(device))
+        netE = DataParallel(netE.to(device))
 
-#  netG_A2B.apply(weights_init_normal)
-#  netG_B2A.apply(weights_init_normal)
+#  netG_A2B.apply(weights_init_normal) # G
+#  netG_B2A.apply(weights_init_normal) # G
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
 
@@ -242,11 +249,17 @@ for epoch in range(opt.epoch, opt.n_epochs):
     # Image sample
     with torch.no_grad():
         netG_B2A.eval()
-        out = netG_B2A.model(fix_B)
+        if opt.device == 'cuda':
+            out = netG_B2A.module.model(fix_B)
+        else:
+            out = netG_B2A.model(fix_B)
         fake_A = out + fix_B
         out2 = (out > 0.01).float()
         # Gen ema image
-        out_ema = netE.model(fix_B)
+        if opt.device == 'cuda':
+            out_ema = netE.module.model(fix_B)
+        else:
+            out_ema = netE.model(fix_B)
         fake_E = out_ema + fix_B
         out_ema2 = (out_ema > 0.01).float()
 
@@ -275,8 +288,8 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Save every epoch for B2A
     states = {
-              'netG_B2A': netG_B2A.state_dict(),
-              'netE': netE.state_dict()
+        'netG_B2A': netG_B2A.state_dict(),
+        'netE': netE.state_dict()
     }
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')
 

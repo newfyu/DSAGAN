@@ -108,7 +108,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         B = T.functional.pad(B, pad, padding_mode=padding_mode)
     else:
         B = B0.unsqueeze(0)
-        B = T.functional.pad(B, (0, 0, pad, pad), padding_mode=padding_mode)  # 仅pad了底边
+#         B = T.functional.pad(B, (0, 0, pad, pad), padding_mode=padding_mode)  # 仅pad了底边
     if return_x:
         B_dnorm = torchvision.utils.make_grid(B0, normalize=True, padding=0)
         B_dnorm = T.ToPILImage()(B_dnorm)
@@ -120,9 +120,14 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         else:
             checkpoint = torch.load(ckpt, map_location=device)
             model.load_state_dict(checkpoint['netE'])
+#             model.load_state_dict(checkpoint['netG_B2A'])
+
         model.to(device)
         with torch.no_grad():
-            fakeA = model.model(B)
+            try:
+                fakeA = model.model(B)
+            except:
+                fakeA = model.module.model(B)
         if multiangle:
             fakeA[1] = T.functional.rotate(fakeA[1], 270)
             fakeA[2] = T.functional.rotate(fakeA[2], 180)
