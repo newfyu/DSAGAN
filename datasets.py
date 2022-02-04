@@ -51,7 +51,7 @@ class ImageDataset(Dataset):
         if mode == 'train':
             self.transform = T.Compose([
                 #  T.Lambda(lambda img: tophat(img, 50)),  # TopHat增强
-                T.Lambda(lambda img:random_tophat(img, p=0.3)), # random_tophat
+                #  T.Lambda(lambda img:random_tophat(img, p=0.5)), # random_tophat
                 T.RandomResizedCrop(size, scale=(0.6, 1), interpolation=Image.BICUBIC),
                 #  T.Resize(size),
                 T.RandomHorizontalFlip(p=0.5),

@@ -108,7 +108,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         B = T.functional.pad(B, pad, padding_mode=padding_mode)
     else:
         B = B0.unsqueeze(0)
-#         B = T.functional.pad(B, (0, 0, pad, pad), padding_mode=padding_mode)  # 仅pad了底边
+        B = T.functional.pad(B, (0, 0, pad, pad), padding_mode=padding_mode)  # 仅pad了底边
     if return_x:
         B_dnorm = torchvision.utils.make_grid(B0, normalize=True, padding=0)
         B_dnorm = T.ToPILImage()(B_dnorm)
@@ -119,8 +119,8 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
             model.load_state_dict(ckpt)
         else:
             checkpoint = torch.load(ckpt, map_location=device)
-            model.load_state_dict(checkpoint['netE'])
-#             model.load_state_dict(checkpoint['netG_B2A'])
+#             model.load_state_dict(checkpoint['netE'])
+            model.load_state_dict(checkpoint['netG_B2A'])
 
         model.to(device)
         with torch.no_grad():
@@ -154,7 +154,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
         return out
 
 
-def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5, cutoff=1, gamma=1.5):
+def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=True, denoise=5, cutoff=1, gamma=1.5, size=512):
     """读取dicom，提取血管后转换为gif图片
     scr: dicom地址
     dst: 输出gif地址
@@ -166,17 +166,17 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
     """
     arr = dcmread(src).pixel_array
     tfmc = T.Compose([
-        T.Resize(256),
+        T.Resize(size),
         T.ToTensor(),
         T.Normalize((0.5,), (0.5,))
     ])
-    tfmc2 = T.Compose([T.Resize(256), T.ToTensor()])
+    tfmc2 = T.Compose([T.Resize(size), T.ToTensor()])
     imgs = []
     for i in tqdm(range(arr.shape[0])):
         B_arr = arr[i]
         B = tophat(B_arr)
         B = tfmc(B)
-        B_dnorm, fakeA = fusion_predict(model, ckpts, B, pad=pad, device=device, multiangle=multiangle, denoise=denoise, cutoff=cutoff)
+        B_dnorm, fakeA = fusion_predict(model, ckpts, B, pad=pad, device=device, multiangle=multiangle, denoise=denoise, cutoff=cutoff, size=size)
         B_dnorm = tfmc2(Image.fromarray(B_arr)).repeat(3, 1, 1)
         B_dnorm = torchvision.utils.make_grid(B_dnorm, normalize=True, padding=0)
         fakeA = T.functional.adjust_gamma(fakeA, gamma=gamma)
@@ -190,7 +190,7 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
     img.save(dst, save_all=True, append_images=imgs)
 
 
-def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, remove_size=500, return_skel=False):
+def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, remove_size=500, return_skel=False, hole_max_size=50):
     """
     local_kernel: thresh_local's filter size
     local_offset: thresh of local's offset value
@@ -217,6 +217,8 @@ def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, 
     dst2 = (dst2 * 255).astype('uint8')
 
     inter = ((dst2 / 255) * (inter / 255) * 255).astype('uint8')
+    inter = fill_hole(inter, hole_max_size=hole_max_size)
+    
     if return_skel:
         skel = morphology.skeletonize(inter / 255)
         skel = skel.astype(np.uint8) * 255
@@ -225,7 +227,11 @@ def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, 
         #  dst_rgb[:, :, 2] += (skel / 50).astype('uint8')
         return T.ToPILImage()(inter), T.ToPILImage()(dst_rgb)
     else:
-        return T.ToPILImage()(inter)
+        contours2,_ = cv2.findContours(inter, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        edge = np.zeros_like(img).astype('uint8')
+        for i in range(len(contours2)):
+            cv2.drawContours(edge, contours2, i, (255,255,255))
+        return T.ToPILImage()(inter), T.ToPILImage()(edge)
 
 
 def merge_ckpts(ckpt_list):
@@ -241,3 +247,16 @@ def merge_ckpts(ckpt_list):
 
 def denorm(x):
     return (x - x.min()) / (x.max() - x.min() + 1e-5)
+
+def fill_hole(img, hole_max_size=50):
+    contours, _ = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    n = len(contours)  # 轮廓的个数
+    cv_contours = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area <= hole_max_size:
+            cv_contours.append(contour)
+        else:
+            continue
+    cv2.fillPoly(img, cv_contours, (255, 255, 255))
+    return img

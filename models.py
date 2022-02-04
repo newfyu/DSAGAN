@@ -21,7 +21,7 @@ class ResidualBlock(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, input_nc, output_nc, n_residual_blocks=9, skip_connet=True):
+    def __init__(self, input_nc, output_nc, n_residual_blocks=5, skip_connet=True):
         super(Generator, self).__init__()
         self.skip_connet = skip_connet
 
