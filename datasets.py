@@ -51,11 +51,11 @@ class ImageDataset(Dataset):
         if mode == 'train':
             self.transform = T.Compose([
                 #  T.Lambda(lambda img: tophat(img, 50)),  # TopHat增强
-                #  T.Lambda(lambda img:random_tophat(img, p=0.5)), # random_tophat
+                T.Lambda(lambda img:random_tophat(img, p=0.5)), # random_tophat
                 T.RandomResizedCrop(size, scale=(0.6, 1), interpolation=Image.BICUBIC),
                 #  T.Resize(size),
                 T.RandomHorizontalFlip(p=0.5),
-                #  T.Lambda(lambda x:random_rotate(x, p=1, angles=[0, 180])), # 旋转
+                T.Lambda(lambda x:random_rotate(x, p=1, angles=[0, 180])), # 旋转
                 T.ColorJitter(0.3, 0.3),
                 T.Lambda(lambda x:random_gamma(x, (0.2, 2), p=1)),
                 T.ToTensor(),

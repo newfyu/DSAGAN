@@ -119,8 +119,8 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
             model.load_state_dict(ckpt)
         else:
             checkpoint = torch.load(ckpt, map_location=device)
-#             model.load_state_dict(checkpoint['netE'])
-            model.load_state_dict(checkpoint['netG_B2A'])
+            model.load_state_dict(checkpoint['netE'])
+            #  model.load_state_dict(checkpoint['netG_B2A'])
 
         model.to(device)
         with torch.no_grad():
@@ -140,6 +140,7 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
 
     out = torch.cat(outs)
     out = out.max(0, True)[0]
+#     out = out.mean(0, True)[0]
     out = torchvision.utils.make_grid(out, normalize=True)
 
     out = (out.permute(1, 2, 0).detach().cpu().numpy() * 255).astype('uint8')
