@@ -91,7 +91,7 @@ class EMA():
 def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=3, cutoff=1, padding_mode='reflect'):
     """融合多个角度或多个ckpt的输出,可取得更好的结果
     ckpt：checkpoint path
-    x：input tensor, shape(C,H,W)
+    x: input multiple tensor, each shape(C,H,W)
     pad：边缘填充, 如果mutiangle=False, 仅填充right和bottom，如果multiangel=True, 填充四边。
          pad可增加边缘血管的提取，但也可能增加噪声
     return_x: 是否返回转换成图片的x
@@ -191,7 +191,7 @@ def make_gif_from_dicom(src, dst, model, ckpts, pad=0, device='cpu', multiangle=
     img.save(dst, save_all=True, append_images=imgs)
 
 
-def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, remove_size=500, return_skel=False, hole_max_size=50):
+def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, remove_size=500, hole_max_size=50):
     """
     local_kernel: thresh_local's filter size
     local_offset: thresh of local's offset value
@@ -200,7 +200,7 @@ def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, 
     remove_size: remove_small_objects's max size
     """
     image = np.array(img.convert('L'))
-    thresh = filters.threshold_yen(image)  # bad
+    thresh = filters.threshold_yen(image)
     seg1 = (image >= (thresh - yan_offset))
     seg1 = morphology.remove_small_objects(seg1, 30)
     seg1 = seg1.astype('uint8') * 255
@@ -219,20 +219,21 @@ def make_mask(img, local_kernel=15, local_offset=0, yan_offset=0, close_iter=3, 
 
     inter = ((dst2 / 255) * (inter / 255) * 255).astype('uint8')
     inter = fill_hole(inter, hole_max_size=hole_max_size)
+    return T.ToPILImage()(inter)
     
-    if return_skel:
-        skel = morphology.skeletonize(inter / 255)
-        skel = skel.astype(np.uint8) * 255
-        dst_rgb = cv2.cvtColor(inter.astype('uint8'), cv2.COLOR_GRAY2RGB)
-        dst_rgb[:, :, 1] += (skel / 50).astype('uint8')
-        #  dst_rgb[:, :, 2] += (skel / 50).astype('uint8')
-        return T.ToPILImage()(inter), T.ToPILImage()(dst_rgb)
-    else:
-        contours2,_ = cv2.findContours(inter, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-        edge = np.zeros_like(img).astype('uint8')
-        for i in range(len(contours2)):
-            cv2.drawContours(edge, contours2, i, (255,255,255))
-        return T.ToPILImage()(inter), T.ToPILImage()(edge)
+    #  if return_skel:
+        #  skel = morphology.skeletonize(inter / 255)
+        #  skel = skel.astype(np.uint8) * 255
+        #  dst_rgb = cv2.cvtColor(inter.astype('uint8'), cv2.COLOR_GRAY2RGB)
+        #  dst_rgb[:, :, 1] += (skel / 50).astype('uint8')
+        #  #  dst_rgb[:, :, 2] += (skel / 50).astype('uint8')
+        #  return T.ToPILImage()(inter), T.ToPILImage()(dst_rgb)
+    #  else:
+        #  contours2,_ = cv2.findContours(inter, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        #  edge = np.zeros_like(img).astype('uint8')
+        #  for i in range(len(contours2)):
+            #  cv2.drawContours(edge, contours2, i, (255,255,255))
+        #  return T.ToPILImage()(inter), T.ToPILImage()(edge)
 
 
 def merge_ckpts(ckpt_list):
@@ -261,3 +262,14 @@ def fill_hole(img, hole_max_size=50):
             continue
     cv2.fillPoly(img, cv_contours, (255, 255, 255))
     return img
+
+def clear_mask(mask):
+    sp = np.array(mask)
+    conts, _ = cv2.findContours(sp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    for idx, cont in enumerate(conts):
+        area = cv2.contourArea(cont)
+        perimeter= cv2.arcLength(cont,True)
+        apr = area/(perimeter+1e-5)
+        if apr>2.5 and area<3000:
+            cv2.fillPoly(sp, [cont], (0,0,0))
+    return Image.fromarray(sp)
