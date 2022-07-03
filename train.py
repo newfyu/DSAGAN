@@ -45,7 +45,7 @@ parser.add_argument('--ema_begin_step', type=int, default=10000, help='ema start
 parser.add_argument('--sleep', type=float, default=0., help='slow down train, if you gpu overheat')
 parser.add_argument('--exp_name', type=str, help='mlflow experiment name', default='V46')
 parser.add_argument('--name', type=str, help='mlflow trial name', required=True)
-parser.add_argument('--resume', type=str, default=None, help='resume from checkpoint')
+parser.add_argument('--resume', type=str, default=None, help='resume from checkpoint, also need set n_epochs,decay_epoch')
 parser.add_argument('--nobi', action='store_false', help='unet bilinear mode')
 
 opt = parser.parse_args()
@@ -56,15 +56,15 @@ device = torch.device(opt.device)
 # Networks
 #  netG_A2B = Generator(opt.input_nc, opt.output_nc) # G
 #  netG_B2A = Generator(opt.output_nc, opt.input_nc) # G
-netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi) # U
-netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi) # U
+netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi)  # U
+netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi)  # U
 netD_A = Discriminator(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
 # EMA model
 ema_updater = EMA(0.995)
 #  netE = Generator(opt.output_nc, opt.input_nc) # G
-netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi) # U
+netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi)  # U
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
@@ -236,7 +236,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
             ema_updater.update_moving_average(netE, netG_B2A)
 
         pbar.set_description(f'Epoch:{epoch}')
-        pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
+        pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}, lr={optimizer_G.param_groups[0]["lr"]}')
         if i % opt.log_step == 0:
             mlflow.log_metrics({'loss_G': loss_G.item(), 'loss_G_identity': (loss_identity_A + loss_identity_B).item(), 'loss_G_GAN': (loss_GAN_A2B + loss_GAN_B2A).item(), 'loss_G_cycle': (loss_cycle_ABA + loss_cycle_BAB).item(), 'loss_D': (loss_D_A + loss_D_B).item()}, step=step)
         time.sleep(opt.sleep)

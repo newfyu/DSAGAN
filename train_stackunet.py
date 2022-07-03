@@ -10,24 +10,25 @@ import torchvision
 import torchvision.transforms as transforms
 from PIL import Image
 from torch.autograd import Variable
+from torch.nn import DataParallel
 from torch.utils.data import DataLoader
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
-from datasets import CelebDataset
-from models import Discriminator, Generator, UNet
+from datasets import ImageDataset
+from models import Discriminator, Generator, UNet, Stack_Unet, Stack_Dis
 from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--epoch', type=int, default=0, help='starting epoch')
-parser.add_argument('--n_epochs', type=int, default=12, help='number of epochs of training')
-parser.add_argument('--decay_epoch', type=int, default=10, help='epoch to start linearly decaying the learning rate to 0')
-parser.add_argument('--batch_size', type=int, default=8, help='size of the batches')
-parser.add_argument('--dataroot', type=str, default='datasets/celeba_deblur/', help='root directory of the dataset')
+parser.add_argument('--n_epochs', type=int, default=60, help='number of epochs of training')
+parser.add_argument('--decay_epoch', type=int, default=40, help='epoch to start linearly decaying the learning rate to 0')
+parser.add_argument('--batch_size', type=int, default=4, help='size of the batches')
+parser.add_argument('--dataroot', type=str, default='datasets/cycledsa_v46/', help='root directory of the dataset')
 parser.add_argument('--lr', type=float, default=0.0002, help='initial learning rate')
-parser.add_argument('--size', type=int, default=160, help='size of the data crop (squared assumed)')
-parser.add_argument('--input_nc', type=int, default=3, help='number of channels of input data')
-parser.add_argument('--output_nc', type=int, default=3, help='number of channels of output data')
+parser.add_argument('--size', type=int, default=512, help='size of the data crop (squared assumed)')
+parser.add_argument('--input_nc', type=int, default=1, help='number of channels of input data')
+parser.add_argument('--output_nc', type=int, default=1, help='number of channels of output data')
 parser.add_argument('--n_cpu', type=int, default=8, help='number of cpu threads to use during batch generation')
 parser.add_argument('--nd', type=int, default=1, help='train the discriminator every nd steps')
 parser.add_argument('--ng', type=int, default=1, help='train the generator every ng steps')
@@ -36,16 +37,15 @@ parser.add_argument('--w_idt', type=int, default=5, help='idt loss weight')
 parser.add_argument('--w_cycle', type=int, default=10, help='cycle loss weight')
 parser.add_argument('--w_a2b', type=int, default=1, help='GAN generator_A2B loss weight')
 parser.add_argument('--w_b2a', type=int, default=1, help='GAN generator_B2A loss weight')
-parser.add_argument('--replay_prob', type=float, default=1, help='replay prob')
-parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0')
-parser.add_argument('--log_step', type=int, default=100, help='select device, such as cpu,cuda:0')
-parser.add_argument('--ema_step', type=int, default=10, help='ema update step')
-parser.add_argument('--ema_begin_step', type=int, default=5000, help='ema start step')
+parser.add_argument('--replay_prob', type=float, default=0.5, help='replay prob')
+parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0,mgpu use cuda')
+parser.add_argument('--log_step', type=int, default=100, help='log to mlflow every step')
+parser.add_argument('--ema_step', type=int, default=100, help='ema update step, default 10')
+parser.add_argument('--ema_begin_step', type=int, default=10000, help='ema start step')
 parser.add_argument('--sleep', type=float, default=0., help='slow down train, if you gpu overheat')
-parser.add_argument('--exp_name', type=str, help='mlflow experiment name', default='CelebaDeblur')
+parser.add_argument('--exp_name', type=str, help='mlflow experiment name', default='stack')
 parser.add_argument('--name', type=str, help='mlflow trial name', required=True)
 parser.add_argument('--resume', type=str, default=None, help='resume from checkpoint')
-parser.add_argument('--skip', action='store_true', default=False, help='whether to use skip connection')
 parser.add_argument('--nobi', action='store_false', help='unet bilinear mode')
 
 opt = parser.parse_args()
@@ -54,17 +54,14 @@ print(opt)
 device = torch.device(opt.device)
 ###### Definition of variables ######
 # Networks
-netG_A2B = Generator(opt.input_nc, opt.output_nc, n_residual_blocks=5, skip_connet=opt.skip)
-netG_B2A = Generator(opt.output_nc, opt.input_nc, n_residual_blocks=5, skip_connet=opt.skip)
-#  netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi, res=False)
-#  netG_B2A = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi, res=False)
-netD_A = Discriminator(opt.input_nc)
+netG_A2B = UNet(opt.input_nc, opt.output_nc, dim=opt.dim, bilinear=opt.nobi) # U
+netG_B2A = Stack_Unet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi) # U
+netD_A = Stack_Dis(opt.input_nc)
 netD_B = Discriminator(opt.output_nc)
 
 # EMA model
 ema_updater = EMA(0.995)
-#  netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi, res=False)
-netE = Generator(opt.output_nc, opt.input_nc, n_residual_blocks=5, skip_connet=opt.skip)
+netE = UNet(opt.output_nc, opt.input_nc, dim=opt.dim, bilinear=opt.nobi) # U
 
 if opt.device != 'cpu':
     netG_A2B.to(device)
@@ -72,9 +69,13 @@ if opt.device != 'cpu':
     netD_A.to(device)
     netD_B.to(device)
     netE.to(device)
+    if opt.device == 'cuda':
+        netG_A2B = DataParallel(netG_A2B.to(device))
+        netG_B2A = DataParallel(netG_B2A.to(device))
+        netD_A = DataParallel(netD_A.to(device))
+        netD_B = DataParallel(netD_B.to(device))
+        netE = DataParallel(netE.to(device))
 
-netG_A2B.apply(weights_init_normal)
-netG_B2A.apply(weights_init_normal)
 netD_A.apply(weights_init_normal)
 netD_B.apply(weights_init_normal)
 
@@ -126,14 +127,15 @@ input_B = torch.FloatTensor(opt.batch_size, opt.output_nc, opt.size, opt.size).t
 target_real = Variable(torch.FloatTensor(opt.batch_size, 1).fill_(1.0), requires_grad=False).to(device)
 target_fake = Variable(torch.FloatTensor(opt.batch_size, 1).fill_(0.0), requires_grad=False).to(device)
 
-fake_A_buffer = ReplayBuffer(p=opt.replay_prob)
+fake_A1_buffer = ReplayBuffer(p=opt.replay_prob)
+fake_A2_buffer = ReplayBuffer(p=opt.replay_prob)
 fake_B_buffer = ReplayBuffer(p=opt.replay_prob)
 
 # Dataset loader
-dataloader = DataLoader(CelebDataset(opt.dataroot, unaligned=True, size=opt.size, mode='train'),
+dataloader = DataLoader(ImageDataset(opt.dataroot, unaligned=True, size=opt.size, mode='train'),
                         batch_size=opt.batch_size, shuffle=True, num_workers=opt.n_cpu, drop_last=True)
 
-simple_dl = DataLoader(CelebDataset(opt.dataroot, unaligned=True, size=opt.size, mode='train'),
+simple_dl = DataLoader(ImageDataset(opt.dataroot, unaligned=False, size=opt.size, mode='test'),
                        batch_size=8, shuffle=False, num_workers=opt.n_cpu)
 fix_sample = next(iter(simple_dl))
 fix_A = fix_sample['A'].to(device)
@@ -159,23 +161,23 @@ for epoch in range(opt.epoch, opt.n_epochs):
         same_B = netG_A2B(real_B)
         loss_identity_B = criterion_identity(same_B, real_B) * opt.w_idt
         # G_B2A(A) should equal A if real A is fed
-        same_A = netG_B2A(real_A)
-        loss_identity_A = criterion_identity(same_A, real_A) * opt.w_idt
+        same_A1, same_A2, _ = netG_B2A(real_A)
+        loss_identity_A = criterion_identity(same_A1, real_A) * opt.w_idt + criterion_identity(same_A2, real_A) * opt.w_idt
 
         # GAN loss
         fake_B = netG_A2B(real_A)
         pred_fake = netD_B(fake_B)
         loss_GAN_A2B = criterion_GAN(pred_fake, target_real) * opt.w_a2b
 
-        fake_A = netG_B2A(real_B)
-        pred_fake = netD_A(fake_A)
-        loss_GAN_B2A = criterion_GAN(pred_fake, target_real) * opt.w_b2a
+        fake_A1, fake_A2, _ = netG_B2A(real_B)
+        pred_fake1, pred_fake2 = netD_A(fake_A1, fake_A2)
+        loss_GAN_B2A = criterion_GAN(pred_fake1, target_real) * opt.w_b2a + criterion_GAN(pred_fake2, target_real) * opt.w_b2a
 
         # Cycle loss
-        recovered_A = netG_B2A(fake_B)
+        _, recovered_A, _ = netG_B2A(fake_B)
         loss_cycle_ABA = criterion_cycle(recovered_A, real_A) * opt.w_cycle
 
-        recovered_B = netG_A2B(fake_A)
+        recovered_B = netG_A2B(fake_A2)
         loss_cycle_BAB = criterion_cycle(recovered_B, real_B) * opt.w_cycle
 
         # Total loss
@@ -190,13 +192,14 @@ for epoch in range(opt.epoch, opt.n_epochs):
         optimizer_D_A.zero_grad()
 
         # Real loss
-        pred_real = netD_A(real_A)
-        loss_D_real = criterion_GAN(pred_real, target_real)
+        pred_real1,pred_real2 = netD_A(real_A,real_A)
+        loss_D_real = criterion_GAN(pred_real1, target_real) + criterion_GAN(pred_real2, target_real)
 
         # Fake loss
-        fake_A = fake_A_buffer.push_and_pop(fake_A)
-        pred_fake = netD_A(fake_A.detach())
-        loss_D_fake = criterion_GAN(pred_fake, target_fake)
+        fake_A1 = fake_A1_buffer.push_and_pop(fake_A1)
+        fake_A2 = fake_A2_buffer.push_and_pop(fake_A2)
+        pred_fake1,pred_fake2 = netD_A(fake_A1.detach(),fake_A2.detach())
+        loss_D_fake = criterion_GAN(pred_fake1, target_fake) + criterion_GAN(pred_fake2, target_fake)
 
         # Total loss
         loss_D_A = (loss_D_real + loss_D_fake) * 0.5
@@ -227,7 +230,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
         ###################################
         # ema update
         if step != 0 and step % opt.ema_step == 0 and step > opt.ema_begin_step:
-            ema_updater.update_moving_average(netE, netG_A2B)
+            ema_updater.update_moving_average(netE, netG_B2A)
 
         pbar.set_description(f'Epoch:{epoch}')
         pbar.set_postfix_str(f'loss={loss_G:.4}, idt={loss_identity_A + loss_identity_B:.4}, G={loss_GAN_A2B + loss_GAN_B2A:.4}, cycle={loss_cycle_ABA + loss_cycle_BAB:.4}, D={loss_D_A + loss_D_B:.4}')
@@ -243,24 +246,30 @@ for epoch in range(opt.epoch, opt.n_epochs):
     # Image sample
     with torch.no_grad():
         netG_B2A.eval()
-        netG_A2B.eval()
-        if opt.skip:
-            fake_A = netG_B2A.model(fix_B) + fix_B
-            fake_B = netG_A2B.model(fix_A) + fix_A
-            fake_E = netE.model(fix_A) + fix_A
+        if opt.device == 'cuda':
+            out = netG_B2A.module.model(fix_B) # res
         else:
-            fake_A = netG_B2A.model(fix_B)
-            fake_B = netG_A2B.model(fix_A)
-            fake_E = netE.model(fix_A)
+            out = netG_B2A.model(fix_B)
+        fake_A = out + fix_B 
+        out2 = (out > 0.01).float() # threshhold
+        # Gen ema image
+        if opt.device == 'cuda':
+            out_ema = netE.module.model(fix_B)
+        else:
+            out_ema = netE.model(fix_B)
+        fake_E = out_ema + fix_B
+        out_ema2 = (out_ema > 0.01).float()
+
         B_norm = make_grid(fix_B, normalize=True, padding=0)
         fake_A = make_grid(fake_A, normalize=True, padding=0)
-        A_norm = make_grid(fix_A, normalize=True, padding=0)
-        fake_B = make_grid(fake_B, normalize=True, padding=0)
-        fake_E = make_grid(fake_E, normalize=True, padding=0)
-        imgs = make_grid([A_norm, fake_B, B_norm, fake_A, fake_E], normalize=True, nrow=1)
+        out = make_grid(out, normalize=True, padding=0)
+        out2 = make_grid(out2, normalize=True, padding=0)
+        out_ema = make_grid(out_ema, normalize=True, padding=0)
+        out_ema2 = make_grid(out_ema2, normalize=True, padding=0)
+
+        imgs = make_grid([B_norm, fake_A, out, out2, out_ema, out_ema2], normalize=True, nrow=1)
         save_image(imgs, f'{art_dir}/img_{str(epoch).zfill(4)}.png')
         netG_B2A.train()
-        netG_A2B.train()
 
     # Save last checkpoints
     states = {'netG_A2B': netG_A2B.state_dict(),
@@ -276,7 +285,7 @@ for epoch in range(opt.epoch, opt.n_epochs):
 
     # Save every epoch for B2A
     states = {
-        'netG_A2B': netG_B2A.state_dict(),
+        'netG_B2A': netG_B2A.state_dict(),
         'netE': netE.state_dict()
     }
     torch.save(states, f'{run_dir}/{str(epoch).zfill(3)}.ckpt')

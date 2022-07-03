@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class ResidualBlock(nn.Module):
     def __init__(self, in_features):
         super(ResidualBlock, self).__init__()
@@ -58,7 +59,7 @@ class Generator(nn.Module):
         model += [nn.ReflectionPad2d(3),
                   nn.Conv2d(64, output_nc, 7),
                   #  nn.Tanh()
-                 ]
+                  ]
 
         self.model = nn.Sequential(*model)
 
@@ -67,7 +68,6 @@ class Generator(nn.Module):
             return self.model(x) + x
         else:
             return self.model(x)
-
 
 
 class Discriminator(nn.Module):
@@ -91,25 +91,20 @@ class Discriminator(nn.Module):
 
         # 额外添加层
         #  model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
-                  #  nn.InstanceNorm2d(512),
-                  #  nn.LeakyReLU(0.2, inplace=True)]
+        #  nn.InstanceNorm2d(512),
+        #  nn.LeakyReLU(0.2, inplace=True)]
 
-        #  model += [nn.Conv2d(512, 512, 4, stride=2, padding=1),
-                  #  nn.InstanceNorm2d(512),
-                  #  nn.LeakyReLU(0.2, inplace=True)]
-
+        #  model += [nn.Conv2d(512, 512, 4, stride=1, padding=1),
+        #  nn.InstanceNorm2d(512),
+        #  nn.LeakyReLU(0.2, inplace=True)]
 
         # FCN classification layer
         model += [nn.Conv2d(512, 1, 4, padding=1)]
 
         self.model = nn.Sequential(*model)
-        #  edge_wt = nn.functional.pad(torch.ones(1,26,26,requires_grad=False),(2,2,2,2),value=2) # 边缘加权矩阵
-        #  self.register_buffer('edge_wt', edge_wt)
 
     def forward(self, x):
         x = self.model(x)
-        #  import ipdb; ipdb.set_trace()
-        #  x = x * self.edge_wt
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
 
 
@@ -222,7 +217,40 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 
+class Stack_Unet(nn.Module):
+    def __init__(self, n_channels, n_classes, dim=64, bilinear=True, res=True):
+        super().__init__()
+        self.unet1 = UNet(n_channels, n_classes, dim, bilinear, res)
+        self.unet2 = UNet(n_channels, n_classes, dim, bilinear, res)
+
+    def model(self, x):
+        _,_,res = self.forward(x)
+        return res
+
+    def forward(self, x):
+        out1 = self.unet1(x)
+        out2 = self.unet2(out1.detach())
+        res = x - out2
+        return out1, out2, res
+
+
+class Stack_Dis(nn.Module):
+    def __init__(self, input_nc):
+        super().__init__()
+        self.dis1 = Discriminator(input_nc)
+        self.dis2 = Discriminator(input_nc)
+
+    def forward(self, x1, x2):
+        out1 = self.dis1(x1)
+        out2 = self.dis2(x2)
+        return out1, out2
+
+
 if __name__ == "__main__":
-    net = Discriminator(1)
-    x = torch.randn(5,1,256,256)
-    net(x)
+    G = Stack_Unet(1, 1, 32)
+    D = Discriminator(1)
+    x = torch.randn(3, 1, 512, 512)
+    #  out1, out2, res = G(x)
+    #  print(out1.shape, out2.shape, res.shape)
+    out = D(x)
+    print(out,out.shape)
