@@ -16,7 +16,7 @@ from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
 from datasets import ImageDataset
-from models import Discriminator, Generator, UNet
+from models import Discriminator, Generator, UNet, MultiscaleDiscriminator
 from utils import EMA, LambdaLR, ReplayBuffer, weights_init_normal
 
 parser = argparse.ArgumentParser()
@@ -41,7 +41,7 @@ parser.add_argument('--replay_prob', type=float, default=1, help='replay prob')
 parser.add_argument('--device', type=str, default='cpu', help='select device, such as cpu,cuda:0,mgpu use cuda')
 parser.add_argument('--log_step', type=int, default=100, help='log to mlflow every step')
 parser.add_argument('--ema_step', type=int, default=100, help='ema update step, default 10')
-parser.add_argument('--ema_begin_step', type=int, default=10000, help='ema start step')
+parser.add_argument('--ema_begin_step', type=int, default=0, help='ema start step')
 parser.add_argument('--sleep', type=float, default=0., help='slow down train, if you gpu overheat')
 parser.add_argument('--exp_name', type=str, help='mlflow experiment name', default='V46')
 parser.add_argument('--name', type=str, help='mlflow trial name', required=True)

@@ -108,6 +108,22 @@ class Discriminator(nn.Module):
         return F.avg_pool2d(x, x.size()[2:]).view(x.size()[0], -1)
 
 
+class MultiscaleDiscriminator(nn.Module):
+    def __init__(self, input_nc, num_d=3):
+        super().__init__()
+        self.downsample = nn.AvgPool2d(3, stride=2, padding=[1, 1], count_include_pad=False)
+        self.D = Discriminator(input_nc)
+        self.num_d = num_d
+
+    def forward(self, x):
+        result = []
+        for _ in range(self.num_d):
+            result.append(self.D(x))
+            x = self.downsample(x)
+        result = sum(result) / len(result)
+        return result
+
+
 class UNet(nn.Module):
     def __init__(self, n_channels, n_classes, dim=64, bilinear=True, res=True):
         super(UNet, self).__init__()
@@ -217,23 +233,6 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 
-class Stack_Unet(nn.Module):
-    def __init__(self, n_channels, n_classes, dim=64, bilinear=True, res=True):
-        super().__init__()
-        self.unet1 = UNet(n_channels, n_classes, dim, bilinear, res)
-        self.unet2 = UNet(n_channels, n_classes, dim, bilinear, res)
-
-    def model(self, x):
-        _,_,res = self.forward(x)
-        return res
-
-    def forward(self, x):
-        out1 = self.unet1(x)
-        out2 = self.unet2(out1.detach())
-        res = x - out2
-        return out1, out2, res
-
-
 class Stack_Dis(nn.Module):
     def __init__(self, input_nc):
         super().__init__()
@@ -247,10 +246,8 @@ class Stack_Dis(nn.Module):
 
 
 if __name__ == "__main__":
-    G = Stack_Unet(1, 1, 32)
-    D = Discriminator(1)
+    #  D = Discriminator(1)
+    D = MultiscaleDiscriminator(1)
     x = torch.randn(3, 1, 512, 512)
-    #  out1, out2, res = G(x)
-    #  print(out1.shape, out2.shape, res.shape)
     out = D(x)
-    print(out,out.shape)
+    print(out)

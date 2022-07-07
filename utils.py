@@ -88,7 +88,7 @@ class EMA():
             ma_params.data = self.update_average(old_weight, up_weight)
 
 
-def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=3, cutoff=1, padding_mode='reflect'):
+def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True, multiangle=True, denoise=3, cutoff=1, padding_mode='reflect', netE=True):
     """融合多个角度或多个ckpt的输出,可取得更好的结果
     ckpt：checkpoint path
     x: input multiple tensor, each shape(C,H,W)
@@ -119,8 +119,10 @@ def fusion_predict(model, ckpts, x, size=256, pad=0, device='cpu', return_x=True
             model.load_state_dict(ckpt)
         else:
             checkpoint = torch.load(ckpt, map_location=device)
-            model.load_state_dict(checkpoint['netE'])
-            #  model.load_state_dict(checkpoint['netG_B2A'])
+            if netE:
+                model.load_state_dict(checkpoint['netE'])
+            else:
+                model.load_state_dict(checkpoint['netG_B2A'])
 
         model.to(device)
         with torch.no_grad():
